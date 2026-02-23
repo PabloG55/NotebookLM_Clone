@@ -427,4 +427,4 @@ with gr.Blocks(
     gr.Markdown("<center><small>Powered by Groq · FAISS · Gradio</small></center>")
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(ssr=False)
