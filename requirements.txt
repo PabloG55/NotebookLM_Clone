@@ -1,3 +1,4 @@
+numpy<2
 # Core App
 gradio[oauth]==5.12.0
 spaces>=0.47.0
