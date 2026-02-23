@@ -120,6 +120,8 @@ def chat_response(message, history, notebook_name):
     })
 
     return history, ""
+def clear_chat():
+    return [], ""
 
 # ══════════════════════════════════════════════════════════════
 # SUMMARY
