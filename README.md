@@ -1,12 +1,14 @@
 ---
-title: ThinkBook - NotebookLM Clone
-emoji: 🧠
-colorFrom: indigo
-colorTo: purple
+title: NotebookLM
+emoji: 🚀
+colorFrom: purple
+colorTo: blue
 sdk: gradio
-sdk_version: 4.36.1
+sdk_version: 5.12.0
+python_version: "3.12"
 app_file: app.py
-pinned: false
+hf_oauth: true
+hf_oauth_expiration_minutes: 480
 ---
 
 # ThinkBook 🧠
