@@ -304,12 +304,13 @@ css = """
 footer { display: none !important; }
 """
 
-with gr.Blocks(
-    css=css,
-    title="ThinkBook 🧠",
-    theme=gr.themes.Soft(primary_hue="blue", secondary_hue="green", neutral_hue="slate"),
-) as demo:
+# with gr.Blocks(
+#     css=css,
+#     title="ThinkBook 🧠",
+#     theme=gr.themes.Soft(primary_hue="blue", secondary_hue="green", neutral_hue="slate"),
+# ) as demo:
 
+with gr.Blocks(title="ThinkBook 🧠") as demo:
     # Header
     gr.Markdown(
         "# 🧠 ThinkBook\nUpload any document · Chat · Summarize · Podcast · Quiz · Study Guide",
