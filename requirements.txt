@@ -1,25 +1,18 @@
-numpy<2
-# Core App
-gradio[oauth]==5.12.0
-spaces>=0.47.0
-
-# LLM
+gradio==4.44.1
 groq==0.9.0
 httpx==0.27.2
-
-# Vector + ML
 faiss-cpu==1.7.4
 sentence-transformers==2.7.0
+pymupdf==1.24.0
+python-pptx==0.6.23
+beautifulsoup4==4.12.3
+requests==2.31.0
+gtts==2.5.1
+pydub==0.25.1
+numpy==1.26.4
+python-dotenv==1.0.1
 torch==2.2.2
 transformers==4.40.0
-
-# Document Processing
-PyMuPDF>=1.23.0
-python-pptx>=0.6.21
-beautifulsoup4>=4.12.0
-requests>=2.31.0
-youtube-transcript-api>=0.6.0
-
-# Utilities
-python-dotenv>=1.0.0
-edge-tts>=7.2.7
+tiktoken==0.6.0
+imageio-ffmpeg==0.5.1
+pydantic==2.6.4
