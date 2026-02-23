@@ -177,31 +177,61 @@ def render_quiz_md(quiz):
 
 def gen_quiz(notebook_name, num_q):
     if not notebook_name or notebook_name not in NOTEBOOKS:
-        return "❌ Select a notebook first.", "{}", "", "" , *[gr.Radio(value=None, visible=False)]*MAX_QUIZ_Q
+        return (
+            "❌ Select a notebook first.",
+            "{}",
+            "",
+            "",
+            *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
+        )
 
     try:
-        quiz = generate_quiz(NOTEBOOKS[notebook_name]["text"], num_questions=int(num_q))
+        quiz = generate_quiz(
+            NOTEBOOKS[notebook_name]["text"],
+            num_questions=int(num_q)
+        )
+
         quiz_json = json.dumps(quiz)
         n = int(num_q)
-        radio_updates = [
-            gr.Radio(
-                choices=[f"A: {q['options'].get('A','')}", f"B: {q['options'].get('B','')}", 
-                         f"C: {q['options'].get('C','')}", f"D: {q['options'].get('D','')}"],
-                label=f"Q{i+1}",
-                value=None,
-                visible=(i < n),
-                interactive=True
-            ) if i < n else gr.Radio(visible=False, value=None)
-            for i, q in enumerate(quiz[:MAX_QUIZ_Q])
-        ]
-        # pad if quiz shorter than MAX
-        while len(radio_updates) < MAX_QUIZ_Q:
-            radio_updates.append(gr.Radio(visible=False, value=None))
 
-        return "✅ Quiz ready! Select your answers below.", quiz_json, render_quiz_md(quiz), "", *radio_updates
+        radio_updates = []
+
+        for i in range(MAX_QUIZ_Q):
+            if i < len(quiz) and i < n:
+                q = quiz[i]
+                radio_updates.append(
+                    gr.update(
+                        choices=[
+                            f"A: {q['options'].get('A','')}",
+                            f"B: {q['options'].get('B','')}",
+                            f"C: {q['options'].get('C','')}",
+                            f"D: {q['options'].get('D','')}",
+                        ],
+                        value=None,
+                        visible=True
+                    )
+                )
+            else:
+                radio_updates.append(
+                    gr.update(visible=False, value=None)
+                )
+
+        return (
+            "✅ Quiz ready! Select your answers below.",
+            quiz_json,
+            render_quiz_md(quiz),
+            "",
+            *radio_updates
+        )
+
     except Exception as e:
-        return f"❌ Error: {e}", "{}", "", "", *[gr.Radio(visible=False, value=None)]*MAX_QUIZ_Q
-
+        return (
+            f"❌ Error: {e}",
+            "{}",
+            "",
+            "",
+            *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
+        )
 
 def submit_quiz(quiz_json, *answers):
     try:
