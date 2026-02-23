@@ -81,20 +81,21 @@ def get_notebook_info(notebook_name):
 # ══════════════════════════════════════════════════════════════
 # CHAT
 # ══════════════════════════════════════════════════════════════
-
 def chat_response(message, history, notebook_name):
     if not message.strip():
         return history, ""
+
     if not notebook_name or notebook_name not in NOTEBOOKS:
         history = history or []
-        history.append((message, "❌ Please select a notebook first from the Notebooks tab."))
+        history.append({
+            "role": "assistant",
+            "content": "❌ Please select a notebook first from the Notebooks tab."
+        })
         return history, ""
 
     store = NOTEBOOKS[notebook_name]["store"]
-    prior = []
-    for user_msg, bot_msg in (history or []):
-        prior.append({"role": "user", "content": user_msg})
-        prior.append({"role": "assistant", "content": bot_msg})
+
+    prior = history or []
 
     from features.chat import build_rag_messages
     messages = build_rag_messages(message, store, prior)
@@ -104,13 +105,18 @@ def chat_response(message, history, notebook_name):
         full_response += token
 
     history = history or []
-    history.append((message, full_response))
+
+    history.append({
+        "role": "user",
+        "content": message
+    })
+
+    history.append({
+        "role": "assistant",
+        "content": full_response
+    })
+
     return history, ""
-
-
-def clear_chat():
-    return [], ""
-
 
 # ══════════════════════════════════════════════════════════════
 # SUMMARY
