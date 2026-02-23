@@ -1,11 +1,22 @@
 # This runs before app.py to patch the gradio_client bug
 import gradio_client.utils as u
-import inspect, textwrap, types
 
-src = inspect.getsource(u.get_type)
-new_src = src.replace(
-    'if "const" in schema:',
-    'if isinstance(schema, dict) and "const" in schema:'
-)
-new_src = textwrap.dedent(new_src)
-exec(compile(new_src, "<patch>", "exec"), u.__dict__)
+def _patched_get_type(schema):
+    if not isinstance(schema, dict):
+        return "any"
+    if "const" in schema:
+        return "literal"
+    if "enum" in schema:
+        return "enum"
+    types = schema.get("type", [])
+    if isinstance(types, str):
+        types = [types]
+    if "null" in types:
+        types = [t for t in types if t != "null"]
+    if len(types) == 0:
+        return "any"
+    if len(types) == 1:
+        return types[0]
+    return "union"
+
+u.get_type = _patched_get_type
