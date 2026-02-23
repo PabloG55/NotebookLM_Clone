@@ -85,32 +85,35 @@ def chat_response(message, history, notebook_name):
     if not message.strip():
         return history, ""
 
+    history = history or []
+
+    # If no notebook selected
     if not notebook_name or notebook_name not in NOTEBOOKS:
-        history = history or []
         history.append({
             "role": "assistant",
-            "content": "❌ Please select a notebook first from the Notebooks tab."
+            "content": "❌ Please select a notebook first."
         })
         return history, ""
 
     store = NOTEBOOKS[notebook_name]["store"]
 
-    prior = history or []
-
+    # Import here to avoid circular issues
     from features.chat import build_rag_messages
-    messages = build_rag_messages(message, store, prior)
+
+    # Build RAG prompt using previous conversation
+    messages = build_rag_messages(message, store, history)
 
     full_response = ""
     for token in groq_stream(messages, temperature=0.6, max_tokens=2048):
         full_response += token
 
-    history = history or []
-
+    # Append user message
     history.append({
         "role": "user",
         "content": message
     })
 
+    # Append assistant response
     history.append({
         "role": "assistant",
         "content": full_response
