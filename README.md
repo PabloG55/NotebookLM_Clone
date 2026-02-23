@@ -1,11 +1,11 @@
 ---
 title: NotebookLM
 emoji: 🚀
-colorFrom: purple
-colorTo: blue
+colorFrom: blue
+colorTo: green
 sdk: gradio
 sdk_version: 5.12.0
-python_version: "3.12"
+python_version: "3.10"
 app_file: app.py
 hf_oauth: true
 hf_oauth_expiration_minutes: 480
