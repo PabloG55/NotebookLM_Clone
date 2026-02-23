@@ -278,7 +278,7 @@ with gr.Blocks(
     # Global notebook selector bar
     with gr.Row():
         active_nb = gr.Dropdown(choices=[], label="📚 Active Notebook", interactive=True, scale=4)
-        nb_info_md = gr.Markdown("_No notebook loaded yet_", scale=3)
+        nb_info_md = gr.Markdown("_No notebook loaded yet_")
 
     active_nb.change(get_notebook_info, inputs=active_nb, outputs=nb_info_md)
 
