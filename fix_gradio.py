@@ -1,22 +1,29 @@
 # This runs before app.py to patch the gradio_client bug
 import gradio_client.utils as u
+from gradio_client.utils import APIInfoParseError
 
-def _patched_get_type(schema):
-    if not isinstance(schema, dict):
-        return "any"
-    if "const" in schema:
-        return "literal"
-    if "enum" in schema:
-        return "enum"
-    types = schema.get("type", [])
-    if isinstance(types, str):
-        types = [types]
-    if "null" in types:
-        types = [t for t in types if t != "null"]
-    if len(types) == 0:
-        return "any"
-    if len(types) == 1:
-        return types[0]
-    return "union"
+original = u._json_schema_to_python_type
 
-u.get_type = _patched_get_type
+def _safe_json_schema_to_python_type(schema, defs=None):
+    try:
+        if not isinstance(schema, dict):
+            return "any"
+        # handle anyOf with null (Optional types)
+        if "anyOf" in schema:
+            types = [s.get("type") for s in schema["anyOf"] if s.get("type") != "null"]
+            return types[0] if types else "any"
+        return original(schema, defs)
+    except Exception:
+        return "any"
+
+u._json_schema_to_python_type = _safe_json_schema_to_python_type
+
+def _safe_json_schema_to_python_type_public(schema):
+    try:
+        if not isinstance(schema, dict):
+            return "any"
+        return _safe_json_schema_to_python_type(schema, schema.get("$defs"))
+    except Exception:
+        return "any"
+
+u.json_schema_to_python_type = _safe_json_schema_to_python_type_public
