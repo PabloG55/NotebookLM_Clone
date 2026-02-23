@@ -345,7 +345,7 @@ with gr.Blocks(
         # ── TAB 2: CHAT ──────────────────────────────────────────────────────
         with gr.TabItem("💬 Chat"):
             gr.Markdown("### Ask anything about your document")
-            chatbot = gr.Chatbot(label="ThinkBook AI", height=450, bubble_full_width=False)
+            chatbot = gr.Chatbot(label="ThinkBook AI", height=450, bubble_full_width=False, type="messages")
             with gr.Row():
                 chat_in = gr.Textbox(placeholder="Ask a question...", label="", scale=5, show_label=False)
                 send_btn = gr.Button("Send ➤", variant="primary", scale=1)
