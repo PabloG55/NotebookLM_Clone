@@ -1,7 +1,6 @@
 """
 ThinkBook - NotebookLM Clone
 Gradio interface — works on HuggingFace Spaces (Gradio SDK).
-All core/features logic unchanged; only UI layer replaced.
 """
 import fix_gradio  # patches gradio_client bug
 import gradio as gr
