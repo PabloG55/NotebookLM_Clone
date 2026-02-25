@@ -12,9 +12,6 @@ load_dotenv()
 
 MODELS = [
     "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
-    "gemma-7b-it",
 ]
 
 def get_groq_client():
