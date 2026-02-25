@@ -10,12 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Models tried in order — all currently supported
 MODELS = [
-    "llama-3.3-70b-versatile",  # High quality production LLM
-    "openai/gpt-oss-120b",      # Very capable open-source model
-    "openai/gpt-oss-20b",       # Smaller & faster
-    "llama-3.1-8b-instant",     # Fast and cheap general model
+    "llama-3.1-8b-instant"
 ]
 
 def get_groq_client():
@@ -79,8 +75,8 @@ def _friendly_rate_limit_message(errors: list) -> str:
 def groq_chat(
     messages: list,
     model: str = None,
-    temperature: float = 0.7,
-    max_tokens: int = 2048,
+    temperature: float = 0.3,
+    max_tokens: int = 800,
 ) -> str:
     """
     Send messages to Groq. Auto-falls back through MODELS list if rate limited.
@@ -115,8 +111,8 @@ def groq_chat(
 def groq_stream(
     messages: list,
     model: str = None,
-    temperature: float = 0.7,
-    max_tokens: int = 2048,
+    temperature: float = 0.3,
+    max_tokens: int = 800,
 ):
     """
     Stream tokens from Groq. Auto-falls back through MODELS if rate limited.
