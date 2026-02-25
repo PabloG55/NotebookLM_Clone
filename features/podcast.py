@@ -6,6 +6,7 @@ Dr. Sam (male voice) = expert guest
 Audio uses edge-tts for two distinct, natural Microsoft neural voices.
 Each speaker line is rendered separately and stitched together with pydub.
 """
+import re
 from core.groq_client import groq_chat
 import io
 import asyncio
@@ -62,27 +63,24 @@ RULES:
     ]
     return groq_chat(messages, temperature=0.88, max_tokens=4096)
 
-
 def parse_podcast_script(script: str) -> list:
-    """
-    Parse script into list of (speaker, line) tuples.
-    Returns: [("Alex", "dialogue..."), ("Dr. Sam", "dialogue..."), ...]
-    """
     lines = []
     for line in script.strip().splitlines():
         line = line.strip()
         if not line:
             continue
-        if line.startswith("Dr. Sam:"):
-            content = line[8:].strip()
+        # Handle "Dr. Sam:" and variations like "Dr Sam:" or "Sam:"
+        if re.match(r'^dr\.?\s*sam\s*:', line, re.IGNORECASE):
+            content = re.sub(r'^dr\.?\s*sam\s*:\s*', '', line, flags=re.IGNORECASE).strip()
             if content:
                 lines.append(("Dr. Sam", content))
-        elif line.startswith("Alex:"):
-            content = line[5:].strip()
+        # Handle "Alex:" and variations
+        elif re.match(r'^alex\s*:', line, re.IGNORECASE):
+            content = re.sub(r'^alex\s*:\s*', '', line, flags=re.IGNORECASE).strip()
             if content:
                 lines.append(("Alex", content))
     return lines
-
+    
 
 async def _synthesize_line(text: str, voice: str, output_path: str):
     """Async: synthesize one line of dialogue to an MP3 file using edge-tts."""
