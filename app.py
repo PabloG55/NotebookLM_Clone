@@ -40,12 +40,41 @@ def process_source(notebook_name, source_type, file_obj, url_text):
     if name in NOTEBOOKS:
         return f"❌ '{name}' already exists. Use a different name.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
     try:
+        # if source_type in ["PDF", "PPTX", "TXT"]:
+        #     if file_obj is None:
+        #         return "❌ Please upload a file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+        #     with open(file_obj.name, "rb") as f:
+        #         raw_bytes = f.read()
+        #     raw_text = ingest_source(source_type.lower(), raw_bytes)
         if source_type in ["PDF", "PPTX", "TXT"]:
-            if file_obj is None:
-                return "❌ Please upload a file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
-            with open(file_obj.name, "rb") as f:
-                raw_bytes = f.read()
-            raw_text = ingest_source(source_type.lower(), raw_bytes)
+            if not file_obj:
+                return "❌ Please upload at least one file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+            files = file_obj if isinstance(file_obj, list) else [file_obj]
+            all_text = []
+            for f in files:
+                try:
+                    fname = f.name.lower()
+                    if fname.endswith(".pdf"):
+                        ftype = "pdf"
+                    elif fname.endswith((".pptx", ".ppt")):
+                        ftype = "pptx"
+                    else:
+                        ftype = "txt"
+                    with open(f.name, "rb") as fh:
+                        raw_bytes = fh.read()
+                    text = ingest_source(ftype, raw_bytes)
+                    if text and len(text.strip()) > 20:
+                        all_text.append(text)
+                except Exception as e:
+                    print(f"Skipping {f.name}: {e}")
+            if not all_text:
+                return "❌ Could not extract text from any file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+            raw_text = "\n\n---\n\n".join(all_text)
+        else:
+            if not url_text.strip():
+        
+
+            
         else:
             if not url_text.strip():
                 return "❌ Please enter a URL.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
@@ -336,11 +365,12 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                 with gr.Column():
                     nb_name = gr.Textbox(label="Notebook Name", placeholder="e.g. Biology Notes")
                     src_type = gr.Radio(["PDF", "PPTX", "TXT", "URL"], label="Source Type", value="PDF")
-                    file_in = gr.File(label="Upload File", file_types=[".pdf",".pptx",".ppt",".txt",".md"])
+                    # Multiple files
+                    file_in = gr.File(label="Upload Files (hold Ctrl/Cmd for multiple)", file_types=[".pdf",".pptx",".ppt",".txt",".md"], file_count="multiple")
                     url_in = gr.Textbox(label="URL", placeholder="https://...", visible=False)
 
                     def toggle(t):
-                        return gr.File(visible=t != "URL"), gr.Textbox(visible=t == "URL")
+                        return gr.File(visible=t != "URL", file_count="multiple"), gr.Textbox(visible=t == "URL")
                     src_type.change(toggle, inputs=src_type, outputs=[file_in, url_in])
 
                     add_btn = gr.Button("🚀 Process & Add", variant="primary")
