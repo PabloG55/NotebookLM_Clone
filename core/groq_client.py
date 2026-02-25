@@ -75,8 +75,8 @@ def _friendly_rate_limit_message(errors: list) -> str:
 def groq_chat(
     messages: list,
     model: str = None,
-    temperature: float = 0.3,
-    max_tokens: int = 800,
+    temperature: float = 0.7,
+    max_tokens: int = 2048,
 ) -> str:
     """
     Send messages to Groq. Auto-falls back through MODELS list if rate limited.
@@ -111,8 +111,8 @@ def groq_chat(
 def groq_stream(
     messages: list,
     model: str = None,
-    temperature: float = 0.3,
-    max_tokens: int = 800,
+    temperature: float = 0.7,
+    max_tokens: int = 2048,
 ):
     """
     Stream tokens from Groq. Auto-falls back through MODELS if rate limited.
