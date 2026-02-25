@@ -45,7 +45,7 @@ def process_source(notebook_name, source_type, file_obj, url_text):
         #         return "❌ Please upload a file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
         #     with open(file_obj.name, "rb") as f:
         #         raw_bytes = f.read()
-        #     raw_text = ingest_source(source_type.lower(), raw_bytes)
+        #     raw_text = ingest_source(source_type.lower(), raw_bytes)\
         if source_type in ["PDF", "PPTX", "TXT"]:
             if not file_obj:
                 return "❌ Please upload at least one file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
@@ -70,11 +70,6 @@ def process_source(notebook_name, source_type, file_obj, url_text):
             if not all_text:
                 return "❌ Could not extract text from any file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
             raw_text = "\n\n---\n\n".join(all_text)
-        else:
-            if not url_text.strip():
-        
-
-            
         else:
             if not url_text.strip():
                 return "❌ Please enter a URL.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
