@@ -1,0 +1,13 @@
+# Environments
+.env
+venv/
+.venv/
+env/
+
+# Python caching
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore data storage directories (ChromaDB, Uploads, SQLite Metadata)
+data/
