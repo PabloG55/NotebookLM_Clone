@@ -128,6 +128,86 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
 def clear_chat():
     return [], ""
 
+def generate_summary(notebook_name, mode, profile: gr.OAuthProfile | None):
+    if not profile or not notebook_name: return "❌ Log in and select a notebook."
+    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+    if not nb_id: return "❌ Notebook not found."
+    
+    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "summary", "params": {"mode": mode}})
+    return res.json().get("result", f"❌ Error: {res.text}")
+
+def generate_podcast(notebook_name, exchanges, profile: gr.OAuthProfile | None):
+    if not profile or not notebook_name: return "❌ Log in and select a notebook.", None
+    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+    if not nb_id: return "❌ Notebook not found.", None
+    
+    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "podcast_script", "params": {"num_exchanges": exchanges}})
+    if res.status_code != 200: return f"❌ Error: {res.text}", None
+    d = res.json()
+    return d.get("script", ""), d.get("parsed_lines", [])
+
+def generate_audio(parsed_lines, profile: gr.OAuthProfile | None):
+    if not parsed_lines: return None, "❌ No script generated yet."
+    if not profile: return None, "❌ Log in to hear audio."
+    # We fake the notebook ID here just to pass the auth structure since the audio endpoint uses the script
+    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": "dummy", "artifact_type": "podcast_audio", "params": {"parsed_lines": parsed_lines}})
+    if res.status_code != 200: return None, f"❌ Error: {res.text}"
+    
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+        f.write(res.content)
+        return f.name, "✅ Audio ready!"
+
+MAX_QUIZ_Q = 10
+def gen_quiz(notebook_name, num_q, profile: gr.OAuthProfile | None):
+    radios = [gr.update(visible=False, interactive=True) for _ in range(MAX_QUIZ_Q)]
+    if not profile or not notebook_name: return "❌ Log in/Select MB", "{}", "", "" , *radios
+    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+    if not nb_id: return "❌ Notebook not found", "{}", "", "", *radios
+    
+    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "quiz", "params": {"num_questions": num_q}})
+    if res.status_code != 200: return f"❌ Error: {res.text}", "{}", "", "", *radios
+    
+    quiz_data = res.json().get("quiz", [])
+    md = ""
+    for i, q in enumerate(quiz_data[:MAX_QUIZ_Q]):
+        md += f"**{i+1}. {q['question']}**\n\n"
+        for k, v in q['options'].items():
+             md += f"- **{k})** {v}\n"
+        md += "\n---\n"
+        radios[i] = gr.update(visible=True, choices=["A", "B", "C", "D"], label=f"Q{i+1}")
+        
+    return "✅ Quiz Ready!", json.dumps(quiz_data), md, "", *radios
+
+def submit_quiz(quiz_json, *answers):
+    quiz_data = json.loads(quiz_json)
+    if not quiz_data: return "❌ No quiz active."
+    score = 0
+    md = "### Results\n"
+    for i, q in enumerate(quiz_data):
+        if i >= len(answers) or not answers[i]: continue
+        user_ans = answers[i]
+        correct_ans = q["answer"]
+        if user_ans == correct_ans:
+            score += 1
+            md += f"✅ **Q{i+1} Correct!** ({user_ans})\n{q.get('explanation', '')}\n\n"
+        else:
+            md += f"❌ **Q{i+1} Incorrect.** You chose {user_ans}, correct was {correct_ans}.\n{q.get('explanation', '')}\n\n"
+    md = f"**Final Score:** {score}/{len(quiz_data)}\n\n" + md
+    return md
+
+def generate_study_guide(notebook_name, profile: gr.OAuthProfile | None):
+    if not profile or not notebook_name: return "❌ Log in and select a notebook."
+    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+    if not nb_id: return "❌ Notebook not found."
+    
+    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "study_guide"})
+    return res.json().get("result", f"❌ Error: {res.text}")
+
 # ==========================================
 # UI Build
 # ==========================================
@@ -183,9 +263,75 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                 send_btn = gr.Button("Send ➤", variant="primary", scale=1)
             clr_btn = gr.Button("🗑️ Clear Chat", variant="secondary")
 
-            send_btn.click(chat_response, inputs=[chat_in, chatbot, active_nb], outputs=[chatbot, chat_in])
-            chat_in.submit(chat_response, inputs=[chat_in, chatbot, active_nb], outputs=[chatbot, chat_in])
-            clr_btn.click(clear_chat, outputs=[chatbot, chat_in])
+        # ── TAB 3: SUMMARY ───────────────────────────────────────────────────
+        with gr.TabItem("📝 Summary"):
+            gr.Markdown("### Generate a document summary")
+            with gr.Row():
+                sum_mode = gr.Radio(
+                    ["Brief", "Descriptive"], value="Brief", label="Style",
+                    info="Brief = 4-6 sentences · Descriptive = full structured breakdown",
+                )
+                sum_btn = gr.Button("✨ Generate", variant="primary")
+            sum_out = gr.Markdown()
+            sum_btn.click(generate_summary, inputs=[active_nb, sum_mode], outputs=sum_out)
+
+        # ── TAB 4: PODCAST ───────────────────────────────────────────────────
+        with gr.TabItem("🎙️ Podcast"):
+            gr.Markdown("""
+### 2-person podcast from your document
+🎤 **Alex** — Curious host (US accent) &nbsp;|&nbsp; 🎓 **Dr. Sam** — Expert guest (UK accent)
+            """)
+            with gr.Row():
+                exchanges_sl = gr.Slider(8, 20, value=12, step=1, label="Exchanges")
+                pod_btn = gr.Button("🎙️ Generate Script", variant="primary")
+
+            pod_script_out = gr.Markdown()
+            pod_lines_state = gr.State(None)
+
+            with gr.Row():
+                audio_btn = gr.Button("🔊 Generate Audio", variant="secondary")
+                audio_status = gr.Markdown()
+            audio_out = gr.Audio(label="🎧 Listen", type="filepath")
+
+            pod_btn.click(generate_podcast, inputs=[active_nb, exchanges_sl], outputs=[pod_script_out, pod_lines_state])
+            audio_btn.click(generate_audio, inputs=pod_lines_state, outputs=[audio_out, audio_status])
+
+        # ── TAB 5: QUIZ ──────────────────────────────────────────────────────
+        with gr.TabItem("🧪 Quiz"):
+            gr.Markdown("### Test your knowledge")
+            with gr.Row():
+                num_q_sl = gr.Slider(3, MAX_QUIZ_Q, value=5, step=1, label="Questions")
+                quiz_gen_btn = gr.Button("🎲 Generate Quiz", variant="primary")
+
+            quiz_status_md = gr.Markdown()
+            quiz_display_md = gr.Markdown()
+            quiz_json_box = gr.Textbox(visible=False, value="{}")
+
+            answer_radios = []
+            for i in range(MAX_QUIZ_Q):
+                r = gr.Radio(choices=["A", "B", "C", "D"], label=f"Q{i+1}", visible=False, interactive=True)
+                answer_radios.append(r)
+
+            submit_btn = gr.Button("✅ Submit Answers", variant="primary")
+            quiz_results_md = gr.Markdown()
+
+            quiz_gen_btn.click(
+                gen_quiz,
+                inputs=[active_nb, num_q_sl],
+                outputs=[quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md] + answer_radios,
+            )
+            submit_btn.click(
+                submit_quiz,
+                inputs=[quiz_json_box] + answer_radios,
+                outputs=quiz_results_md,
+            )
+
+        # ── TAB 6: STUDY GUIDE ───────────────────────────────────────────────
+        with gr.TabItem("📚 Study Guide"):
+            gr.Markdown("### Key concepts, definitions, flashcards & summary")
+            study_btn = gr.Button("📚 Generate Study Guide", variant="primary")
+            study_out = gr.Markdown()
+            study_btn.click(generate_study_guide, inputs=[active_nb], outputs=study_out)
 
     # Trigger load when page opens to fetch profile and notebooks
     demo.load(fetch_notebooks, inputs=None, outputs=active_nb)

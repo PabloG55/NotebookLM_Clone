@@ -118,3 +118,63 @@ def chat(request: ChatRequest, hf_user_id: str = Depends(verify_hf_user), db: Se
     db.commit()
 
     return {"response": full_response}
+
+
+class GenerateRequest(BaseModel):
+    notebook_id: str
+    artifact_type: str
+    params: dict = {}
+
+@app.post("/api/generate")
+def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
+    """Handles async generation of Summaries, Podcasts, Quizzes, and Study Guides from the full notebook text"""
+    
+    # Verify Notebook Ownership
+    notebook = db.query(Notebook).filter(Notebook.notebook_id == request.notebook_id, Notebook.hf_user_id == hf_user_id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found or unauthorized")
+        
+    # Reconstruct text by querying ChromaDB for all chunks
+    chroma_dir = get_chroma_db_dir(hf_user_id, request.notebook_id)
+    vstore = VectorStore(chroma_dir)
+    chunks = vstore.collection.get()["documents"]
+    
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Notebook has no processed text")
+        
+    full_text = " ".join(chunks)
+
+    if request.artifact_type == "summary":
+        from features.summarizer import summarize
+        mode = request.params.get("mode", "Brief").lower()
+        res = summarize(full_text, mode=mode)
+        return {"result": res}
+        
+    elif request.artifact_type == "podcast_script":
+        from features.podcast import generate_podcast_script, parse_podcast_script
+        num_exchanges = int(request.params.get("num_exchanges", 12))
+        script_md = generate_podcast_script(full_text, num_exchanges)
+        parsed_lines = parse_podcast_script(script_md)
+        return {"script": script_md, "parsed_lines": parsed_lines}
+        
+    elif request.artifact_type == "podcast_audio":
+        from features.podcast import generate_podcast_audio
+        from fastapi.responses import Response
+        parsed_lines = request.params.get("parsed_lines")
+        if not parsed_lines:
+            raise HTTPException(status_code=400, detail="parsed_lines required for audio generation")
+        audio_bytes = generate_podcast_audio(parsed_lines)
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+        
+    elif request.artifact_type == "quiz":
+        from features.quiz import generate_quiz
+        num_questions = int(request.params.get("num_questions", 5))
+        quiz_data = generate_quiz(full_text, num_questions)
+        return {"quiz": quiz_data}
+        
+    elif request.artifact_type == "study_guide":
+        from features.study_guide import generate_study_guide
+        study_guide = generate_study_guide(full_text)
+        return {"result": study_guide}
+        
+    raise HTTPException(status_code=400, detail="Unknown artifact type")
