@@ -122,21 +122,10 @@ async def _build_audio_async(script_lines: list) -> bytes:
     return buf.read()
 
 
-def generate_podcast_audio(script_lines: list) -> bytes:
+async def generate_podcast_audio(script_lines: list) -> bytes:
     """
     Public entry point: converts parsed script into a dual-voice stitched MP3.
     Alex = JennyNeural (female), Dr. Sam = GuyNeural (male).
     Returns MP3 bytes.
     """
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            raise RuntimeError("closed")
-        return loop.run_until_complete(_build_audio_async(script_lines))
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(_build_audio_async(script_lines))
-        finally:
-            loop.close()
+    return await _build_audio_async(script_lines)

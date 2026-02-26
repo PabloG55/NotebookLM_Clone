@@ -126,7 +126,7 @@ class GenerateRequest(BaseModel):
     params: dict = {}
 
 @app.post("/api/generate")
-def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
+async def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
     """Handles async generation of Summaries, Podcasts, Quizzes, and Study Guides from the full notebook text"""
     
     # Audio generation doesn't need to query ChromaDB for chunks, it strictly uses the provided script
@@ -137,7 +137,7 @@ def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(verify
         parsed_lines = request.params.get("parsed_lines")
         if not parsed_lines:
             raise HTTPException(status_code=400, detail="parsed_lines required for audio generation")
-        audio_bytes = generate_podcast_audio(parsed_lines)
+        audio_bytes = await generate_podcast_audio(parsed_lines)
         return Response(content=audio_bytes, media_type="audio/mpeg")
 
     # Verify Notebook Ownership
