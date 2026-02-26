@@ -89,6 +89,20 @@ def delete_notebook(notebook_name):
     return gr.Dropdown(choices=choices, value=choices[0] if choices else None), "🗑️ Deleted."
 
 
+
+def rename_notebook(old_name, new_name):
+    global NOTEBOOKS
+    new_name = new_name.strip()
+    if not old_name or old_name not in NOTEBOOKS:
+        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), "❌ Select a notebook to rename."
+    if not new_name:
+        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), "❌ Enter a new name."
+    if new_name in NOTEBOOKS:
+        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), f"❌ '{new_name}' already exists."
+    NOTEBOOKS[new_name] = NOTEBOOKS.pop(old_name)
+    choices = list(NOTEBOOKS.keys())
+    return gr.Dropdown(choices=choices, value=new_name), f"✅ Renamed to '{new_name}'."
+
 def get_notebook_info(notebook_name):
     if not notebook_name or notebook_name not in NOTEBOOKS:
         return "No notebook selected."
@@ -314,11 +328,18 @@ with gr.Blocks(title="NotebookLM 🧠") as demo:
                 with gr.Column():
                     add_status = gr.Markdown("_Upload a source to begin._")
                     gr.Markdown("---")
+                    gr.Markdown("### ✏️ Rename Notebook")
+                    rename_input = gr.Textbox(label="New Name", placeholder="Enter new notebook name")
+                    rename_btn = gr.Button("✏️ Rename Selected", variant="secondary")
+                    rename_status = gr.Markdown("")
+
+                    gr.Markdown("---")
                     gr.Markdown("### 🗑️ Delete Active Notebook")
                     del_btn = gr.Button("Delete Selected Notebook", variant="stop")
                     del_status = gr.Markdown("")
 
             add_btn.click(process_source, inputs=[nb_name, src_type, file_in, url_in], outputs=[add_status, active_nb])
+            rename_btn.click(rename_notebook, inputs=[active_nb, rename_input], outputs=[active_nb, rename_status])
             del_btn.click(delete_notebook, inputs=active_nb, outputs=[active_nb, del_status])
 
         # ── TAB 2: CHAT ──────────────────────────────────────────────────────
