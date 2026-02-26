@@ -1,5 +1,5 @@
 """
-ThinkBook - NotebookLM Clone
+NotebookLM Clone
 Gradio interface — works on HuggingFace Spaces (Gradio SDK).
 """
 import fix_gradio  # patches gradio_client bug
@@ -39,12 +39,6 @@ def process_source(notebook_name, source_type, file_obj, url_text):
     if name in NOTEBOOKS:
         return f"❌ '{name}' already exists. Use a different name.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
     try:
-        # if source_type in ["PDF", "PPTX", "TXT"]:
-        #     if file_obj is None:
-        #         return "❌ Please upload a file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
-        #     with open(file_obj.name, "rb") as f:
-        #         raw_bytes = f.read()
-        #     raw_text = ingest_source(source_type.lower(), raw_bytes)\
         if source_type in ["PDF", "PPTX", "TXT"]:
             if not file_obj:
                 return "❌ Please upload at least one file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
@@ -105,47 +99,34 @@ def get_notebook_info(notebook_name):
 # ══════════════════════════════════════════════════════════════
 # CHAT
 # ══════════════════════════════════════════════════════════════
+
 def chat_response(message, history, notebook_name):
     if not message.strip():
         return history, ""
 
     history = history or []
 
-    # If no notebook selected
     if not notebook_name or notebook_name not in NOTEBOOKS:
-        history.append({
-            "role": "assistant",
-            "content": "❌ Please select a notebook first."
-        })
+        history.append({"role": "assistant", "content": "❌ Please select a notebook first."})
         return history, ""
 
     store = NOTEBOOKS[notebook_name]["store"]
 
-    # Import here to avoid circular issues
     from features.chat import build_rag_messages
-
-    # Build RAG prompt using previous conversation
     messages = build_rag_messages(message, store, history)
 
     full_response = ""
     for token in groq_stream(messages, temperature=0.6, max_tokens=2048):
         full_response += token
 
-    # Append user message
-    history.append({
-        "role": "user",
-        "content": message
-    })
-
-    # Append assistant response
-    history.append({
-        "role": "assistant",
-        "content": full_response
-    })
-
+    history.append({"role": "user", "content": message})
+    history.append({"role": "assistant", "content": full_response})
     return history, ""
+
+
 def clear_chat():
     return [], ""
+
 
 # ══════════════════════════════════════════════════════════════
 # SUMMARY
@@ -213,60 +194,32 @@ def render_quiz_md(quiz):
 def gen_quiz(notebook_name, num_q):
     if not notebook_name or notebook_name not in NOTEBOOKS:
         return (
-            "❌ Select a notebook first.",
-            "{}",
-            "",
-            "",
+            "❌ Select a notebook first.", "{}", "", "",
             *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
         )
-
     try:
-        quiz = generate_quiz(
-            NOTEBOOKS[notebook_name]["text"],
-            num_questions=int(num_q)
-        )
-
+        quiz = generate_quiz(NOTEBOOKS[notebook_name]["text"], num_questions=int(num_q))
         quiz_json = json.dumps(quiz)
         n = int(num_q)
-
         radio_updates = []
-
         for i in range(MAX_QUIZ_Q):
             if i < len(quiz) and i < n:
                 q = quiz[i]
-                radio_updates.append(
-                    gr.update(
-                        choices=[
-                            f"A: {q['options'].get('A','')}",
-                            f"B: {q['options'].get('B','')}",
-                            f"C: {q['options'].get('C','')}",
-                            f"D: {q['options'].get('D','')}",
-                        ],
-                        value=None,
-                        visible=True
-                    )
-                )
+                radio_updates.append(gr.update(
+                    choices=[
+                        f"A: {q['options'].get('A', '')}",
+                        f"B: {q['options'].get('B', '')}",
+                        f"C: {q['options'].get('C', '')}",
+                        f"D: {q['options'].get('D', '')}",
+                    ],
+                    value=None, visible=True,
+                ))
             else:
-                radio_updates.append(
-                    gr.update(visible=False, value=None)
-                )
-
-        return (
-            "✅ Quiz ready! Select your answers below.",
-            quiz_json,
-            render_quiz_md(quiz),
-            "",
-            *radio_updates
-        )
-
+                radio_updates.append(gr.update(visible=False, value=None))
+        return ("✅ Quiz ready! Select your answers below.", quiz_json, render_quiz_md(quiz), "", *radio_updates)
     except Exception as e:
-        return (
-            f"❌ Error: {e}",
-            "{}",
-            "",
-            "",
-            *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
-        )
+        return (f"❌ Error: {e}", "{}", "", "", *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)])
+
 
 def submit_quiz(quiz_json, *answers):
     try:
@@ -275,7 +228,6 @@ def submit_quiz(quiz_json, *answers):
         return "❌ No quiz loaded."
     if not quiz:
         return "❌ No quiz loaded."
-
     results = ""
     correct_count = 0
     for i, q in enumerate(quiz):
@@ -290,7 +242,6 @@ def submit_quiz(quiz_json, *answers):
             results += f"**Q{i+1}:** ✅ Correct! ({q['answer']})\n💡 _{explanation}_\n\n"
         else:
             results += f"**Q{i+1}:** ❌ You chose **{letter}**, correct: **{q['answer']}**\n💡 _{explanation}_\n\n"
-
     pct = int((correct_count / len(quiz)) * 100)
     grade = "🏆 Excellent!" if pct >= 80 else ("📚 Good effort!" if pct >= 60 else "📖 Keep studying!")
     results += f"\n---\n### Score: {correct_count}/{len(quiz)} ({pct}%) {grade}"
@@ -328,20 +279,12 @@ css = """
 footer { display: none !important; }
 """
 
-# with gr.Blocks(
-#     css=css,
-#     title="ThinkBook 🧠",
-#     theme=gr.themes.Soft(primary_hue="blue", secondary_hue="green", neutral_hue="slate"),
-# ) as demo:
-
-with gr.Blocks(title="ThinkBook 🧠") as demo:
-    # Header
+with gr.Blocks(title="NotebookLM 🧠") as demo:
     gr.Markdown(
-        "# 🧠 ThinkBook\nUpload any document · Chat · Summarize · Podcast · Quiz · Study Guide",
+        "# 🧠 NotebookLM\nUpload any document · Chat · Summarize · Podcast · Quiz · Study Guide",
         elem_id="title",
     )
 
-    # Global notebook selector bar
     with gr.Row():
         active_nb = gr.Dropdown(choices=[], label="📚 Active Notebook", interactive=True, scale=4)
         nb_info_md = gr.Markdown("_No notebook loaded yet_")
@@ -359,7 +302,6 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                 with gr.Column():
                     nb_name = gr.Textbox(label="Notebook Name", placeholder="e.g. Biology Notes")
                     src_type = gr.Radio(["PDF", "PPTX", "TXT", "URL"], label="Source Type", value="PDF")
-                    # Multiple files
                     file_in = gr.File(label="Upload Files (hold Ctrl/Cmd for multiple)", file_types=[".pdf",".pptx",".ppt",".txt",".md"], file_count="multiple")
                     url_in = gr.Textbox(label="URL", placeholder="https://...", visible=False)
 
@@ -382,7 +324,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
         # ── TAB 2: CHAT ──────────────────────────────────────────────────────
         with gr.TabItem("💬 Chat"):
             gr.Markdown("### Ask anything about your document")
-            chatbot = gr.Chatbot(label="ThinkBook AI", height=450, bubble_full_width=False, type="messages")
+            chatbot = gr.Chatbot(label="NotebookLM AI", height=450, bubble_full_width=False, type="messages")
             with gr.Row():
                 chat_in = gr.Textbox(placeholder="Ask a question...", label="", scale=5, show_label=False)
                 send_btn = gr.Button("Send ➤", variant="primary", scale=1)
@@ -434,7 +376,6 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             quiz_display_md = gr.Markdown()
             quiz_json_box = gr.Textbox(visible=False, value="{}")
 
-            # Radio buttons for answers — one per possible question
             answer_radios = []
             for i in range(MAX_QUIZ_Q):
                 r = gr.Radio(choices=["A","B","C","D"], label=f"Q{i+1}", visible=False, interactive=True)
