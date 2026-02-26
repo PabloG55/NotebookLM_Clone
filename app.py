@@ -36,15 +36,7 @@ def process_source(notebook_name, source_type, file_obj, url_text):
     name = notebook_name.strip()
     if not name:
         return "❌ Please enter a notebook name.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
-    if name in NOTEBOOKS:
-        return f"❌ '{name}' already exists. Use a different name.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
     try:
-        # if source_type in ["PDF", "PPTX", "TXT"]:
-        #     if file_obj is None:
-        #         return "❌ Please upload a file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
-        #     with open(file_obj.name, "rb") as f:
-        #         raw_bytes = f.read()
-        #     raw_text = ingest_source(source_type.lower(), raw_bytes)\
         if source_type in ["PDF", "PPTX", "TXT"]:
             if not file_obj:
                 return "❌ Please upload at least one file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
@@ -68,21 +60,40 @@ def process_source(notebook_name, source_type, file_obj, url_text):
                     print(f"Skipping {f.name}: {e}")
             if not all_text:
                 return "❌ Could not extract text from any file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
-            raw_text = "\n\n---\n\n".join(all_text)
+            new_text = "\n\n---\n\n".join(all_text)
         else:
             if not url_text.strip():
                 return "❌ Please enter a URL.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
-            raw_text = ingest_source("url", url_text.strip())
+            new_text = ingest_source("url", url_text.strip())
 
-        if not raw_text or len(raw_text.strip()) < 50:
+        if not new_text or len(new_text.strip()) < 50:
             return "❌ Could not extract enough text.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
 
-        chunks = chunk_text(raw_text)
-        store = VectorStore()
-        store.add_chunks(chunks)
-        NOTEBOOKS[name] = {"text": raw_text, "store": store}
-        choices = list(NOTEBOOKS.keys())
-        return f"✅ **{name}** added! {len(chunks)} chunks · {len(raw_text.split()):,} words.", gr.Dropdown(choices=choices, value=name)
+        file_count = len(files) if source_type in ["PDF", "PPTX", "TXT"] else 1
+
+        # If notebook already exists → APPEND to it
+        if name in NOTEBOOKS:
+            combined_text = NOTEBOOKS[name]["text"] + "\n\n---\n\n" + new_text
+            chunks = chunk_text(combined_text)
+            store = VectorStore()
+            store.add_chunks(chunks)
+            NOTEBOOKS[name] = {"text": combined_text, "store": store}
+            choices = list(NOTEBOOKS.keys())
+            return (
+                f"➕ **{name}** updated! Added {file_count} file(s) · Now {len(chunks)} chunks · {len(combined_text.split()):,} words total.",
+                gr.Dropdown(choices=choices, value=name)
+            )
+        else:
+            # New notebook
+            chunks = chunk_text(new_text)
+            store = VectorStore()
+            store.add_chunks(chunks)
+            NOTEBOOKS[name] = {"text": new_text, "store": store}
+            choices = list(NOTEBOOKS.keys())
+            return (
+                f"✅ **{name}** created! {file_count} file(s) · {len(chunks)} chunks · {len(new_text.split()):,} words.",
+                gr.Dropdown(choices=choices, value=name)
+            )
     except Exception as e:
         return f"❌ Error: {e}", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
 
@@ -95,6 +106,20 @@ def delete_notebook(notebook_name):
     return gr.Dropdown(choices=choices, value=choices[0] if choices else None), "🗑️ Deleted."
 
 
+def rename_notebook(old_name, new_name):
+    global NOTEBOOKS
+    new_name = new_name.strip()
+    if not old_name or old_name not in NOTEBOOKS:
+        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), "❌ Select a notebook to rename."
+    if not new_name:
+        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), "❌ Enter a new name."
+    if new_name in NOTEBOOKS:
+        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), f"❌ '{new_name}' already exists."
+    NOTEBOOKS[new_name] = NOTEBOOKS.pop(old_name)
+    choices = list(NOTEBOOKS.keys())
+    return gr.Dropdown(choices=choices, value=new_name), f"✅ Renamed to '{new_name}'."
+
+
 def get_notebook_info(notebook_name):
     if not notebook_name or notebook_name not in NOTEBOOKS:
         return "No notebook selected."
@@ -105,47 +130,34 @@ def get_notebook_info(notebook_name):
 # ══════════════════════════════════════════════════════════════
 # CHAT
 # ══════════════════════════════════════════════════════════════
+
 def chat_response(message, history, notebook_name):
     if not message.strip():
         return history, ""
 
     history = history or []
 
-    # If no notebook selected
     if not notebook_name or notebook_name not in NOTEBOOKS:
-        history.append({
-            "role": "assistant",
-            "content": "❌ Please select a notebook first."
-        })
+        history.append({"role": "assistant", "content": "❌ Please select a notebook first."})
         return history, ""
 
     store = NOTEBOOKS[notebook_name]["store"]
 
-    # Import here to avoid circular issues
     from features.chat import build_rag_messages
-
-    # Build RAG prompt using previous conversation
     messages = build_rag_messages(message, store, history)
 
     full_response = ""
     for token in groq_stream(messages, temperature=0.6, max_tokens=2048):
         full_response += token
 
-    # Append user message
-    history.append({
-        "role": "user",
-        "content": message
-    })
-
-    # Append assistant response
-    history.append({
-        "role": "assistant",
-        "content": full_response
-    })
-
+    history.append({"role": "user", "content": message})
+    history.append({"role": "assistant", "content": full_response})
     return history, ""
+
+
 def clear_chat():
     return [], ""
+
 
 # ══════════════════════════════════════════════════════════════
 # SUMMARY
@@ -213,44 +225,29 @@ def render_quiz_md(quiz):
 def gen_quiz(notebook_name, num_q):
     if not notebook_name or notebook_name not in NOTEBOOKS:
         return (
-            "❌ Select a notebook first.",
-            "{}",
-            "",
-            "",
+            "❌ Select a notebook first.", "{}", "", "",
             *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
         )
-
     try:
-        quiz = generate_quiz(
-            NOTEBOOKS[notebook_name]["text"],
-            num_questions=int(num_q)
-        )
-
+        quiz = generate_quiz(NOTEBOOKS[notebook_name]["text"], num_questions=int(num_q))
         quiz_json = json.dumps(quiz)
         n = int(num_q)
-
         radio_updates = []
-
         for i in range(MAX_QUIZ_Q):
             if i < len(quiz) and i < n:
                 q = quiz[i]
-                radio_updates.append(
-                    gr.update(
-                        choices=[
-                            f"A: {q['options'].get('A','')}",
-                            f"B: {q['options'].get('B','')}",
-                            f"C: {q['options'].get('C','')}",
-                            f"D: {q['options'].get('D','')}",
-                        ],
-                        value=None,
-                        visible=True
-                    )
-                )
+                radio_updates.append(gr.update(
+                    choices=[
+                        f"A: {q['options'].get('A', '')}",
+                        f"B: {q['options'].get('B', '')}",
+                        f"C: {q['options'].get('C', '')}",
+                        f"D: {q['options'].get('D', '')}",
+                    ],
+                    value=None,
+                    visible=True,
+                ))
             else:
-                radio_updates.append(
-                    gr.update(visible=False, value=None)
-                )
-
+                radio_updates.append(gr.update(visible=False, value=None))
         return (
             "✅ Quiz ready! Select your answers below.",
             quiz_json,
@@ -258,15 +255,12 @@ def gen_quiz(notebook_name, num_q):
             "",
             *radio_updates
         )
-
     except Exception as e:
         return (
-            f"❌ Error: {e}",
-            "{}",
-            "",
-            "",
+            f"❌ Error: {e}", "{}", "", "",
             *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
         )
+
 
 def submit_quiz(quiz_json, *answers):
     try:
@@ -275,7 +269,6 @@ def submit_quiz(quiz_json, *answers):
         return "❌ No quiz loaded."
     if not quiz:
         return "❌ No quiz loaded."
-
     results = ""
     correct_count = 0
     for i, q in enumerate(quiz):
@@ -290,7 +283,6 @@ def submit_quiz(quiz_json, *answers):
             results += f"**Q{i+1}:** ✅ Correct! ({q['answer']})\n💡 _{explanation}_\n\n"
         else:
             results += f"**Q{i+1}:** ❌ You chose **{letter}**, correct: **{q['answer']}**\n💡 _{explanation}_\n\n"
-
     pct = int((correct_count / len(quiz)) * 100)
     grade = "🏆 Excellent!" if pct >= 80 else ("📚 Good effort!" if pct >= 60 else "📖 Keep studying!")
     results += f"\n---\n### Score: {correct_count}/{len(quiz)} ({pct}%) {grade}"
@@ -326,22 +318,21 @@ css = """
 }
 #title p { color: #8b949e; margin: 4px 0 0 0; }
 footer { display: none !important; }
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.3; }
+    100% { opacity: 1; }
+}
+.uploading { animation: pulse 1.2s ease-in-out infinite; color: #f0a500; font-weight: bold; font-size: 1rem; }
 """
 
-# with gr.Blocks(
-#     css=css,
-#     title="ThinkBook 🧠",
-#     theme=gr.themes.Soft(primary_hue="blue", secondary_hue="green", neutral_hue="slate"),
-# ) as demo:
+with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
 
-with gr.Blocks(title="ThinkBook 🧠") as demo:
-    # Header
     gr.Markdown(
         "# 🧠 ThinkBook\nUpload any document · Chat · Summarize · Podcast · Quiz · Study Guide",
         elem_id="title",
     )
 
-    # Global notebook selector bar
     with gr.Row():
         active_nb = gr.Dropdown(choices=[], label="📚 Active Notebook", interactive=True, scale=4)
         nb_info_md = gr.Markdown("_No notebook loaded yet_")
@@ -354,13 +345,17 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
 
         # ── TAB 1: NOTEBOOKS ─────────────────────────────────────────────────
         with gr.TabItem("📁 Notebooks"):
-            gr.Markdown("### ➕ Add New Notebook")
+            gr.Markdown("### ➕ Add / Append to Notebook")
+            gr.Markdown("_Type an existing notebook name to **add more files** to it, or a new name to **create** one._")
             with gr.Row():
                 with gr.Column():
                     nb_name = gr.Textbox(label="Notebook Name", placeholder="e.g. Biology Notes")
                     src_type = gr.Radio(["PDF", "PPTX", "TXT", "URL"], label="Source Type", value="PDF")
-                    # Multiple files
-                    file_in = gr.File(label="Upload Files (hold Ctrl/Cmd for multiple)", file_types=[".pdf",".pptx",".ppt",".txt",".md"], file_count="multiple")
+                    file_in = gr.File(
+                        label="Upload Files (hold Ctrl/Cmd to select multiple)",
+                        file_types=[".pdf", ".pptx", ".ppt", ".txt", ".md"],
+                        file_count="multiple",
+                    )
                     url_in = gr.Textbox(label="URL", placeholder="https://...", visible=False)
 
                     def toggle(t):
@@ -368,15 +363,42 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                     src_type.change(toggle, inputs=src_type, outputs=[file_in, url_in])
 
                     add_btn = gr.Button("🚀 Process & Add", variant="primary")
+                    upload_status = gr.Markdown("")
 
                 with gr.Column():
                     add_status = gr.Markdown("_Upload a source to begin._")
+
+                    gr.Markdown("---")
+                    gr.Markdown("### ✏️ Rename Notebook")
+                    rename_input = gr.Textbox(label="New Name", placeholder="Enter new notebook name")
+                    rename_btn = gr.Button("✏️ Rename Selected", variant="secondary")
+                    rename_status = gr.Markdown("")
+
                     gr.Markdown("---")
                     gr.Markdown("### 🗑️ Delete Active Notebook")
                     del_btn = gr.Button("Delete Selected Notebook", variant="stop")
                     del_status = gr.Markdown("")
 
-            add_btn.click(process_source, inputs=[nb_name, src_type, file_in, url_in], outputs=[add_status, active_nb])
+            # Upload animation using .then() chaining
+            add_btn.click(
+                lambda: "<span class='uploading'>⏳ Processing files... please wait.</span>",
+                inputs=None,
+                outputs=upload_status,
+            ).then(
+                process_source,
+                inputs=[nb_name, src_type, file_in, url_in],
+                outputs=[add_status, active_nb],
+            ).then(
+                lambda: "",
+                inputs=None,
+                outputs=upload_status,
+            )
+
+            rename_btn.click(
+                rename_notebook,
+                inputs=[active_nb, rename_input],
+                outputs=[active_nb, rename_status],
+            )
             del_btn.click(delete_notebook, inputs=active_nb, outputs=[active_nb, del_status])
 
         # ── TAB 2: CHAT ──────────────────────────────────────────────────────
@@ -396,8 +418,10 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
         with gr.TabItem("📝 Summary"):
             gr.Markdown("### Generate a document summary")
             with gr.Row():
-                sum_mode = gr.Radio(["Brief", "Descriptive"], value="Brief", label="Style",
-                                    info="Brief = 4-6 sentences · Descriptive = full structured breakdown")
+                sum_mode = gr.Radio(
+                    ["Brief", "Descriptive"], value="Brief", label="Style",
+                    info="Brief = 4-6 sentences · Descriptive = full structured breakdown",
+                )
                 sum_btn = gr.Button("✨ Generate", variant="primary")
             sum_out = gr.Markdown()
             sum_btn.click(generate_summary, inputs=[active_nb, sum_mode], outputs=sum_out)
@@ -434,10 +458,9 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             quiz_display_md = gr.Markdown()
             quiz_json_box = gr.Textbox(visible=False, value="{}")
 
-            # Radio buttons for answers — one per possible question
             answer_radios = []
             for i in range(MAX_QUIZ_Q):
-                r = gr.Radio(choices=["A","B","C","D"], label=f"Q{i+1}", visible=False, interactive=True)
+                r = gr.Radio(choices=["A", "B", "C", "D"], label=f"Q{i+1}", visible=False, interactive=True)
                 answer_radios.append(r)
 
             submit_btn = gr.Button("✅ Submit Answers", variant="primary")
