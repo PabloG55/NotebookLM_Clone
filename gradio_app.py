@@ -78,12 +78,14 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
     history = history or []
 
     if not profile:
-        history.append([message, "❌ Please log in first."])
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": "❌ Please log in first."})
         yield history, ""
         return
 
     if not notebook_name:
-        history.append([message, "❌ Please select a notebook first."])
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": "❌ Please select a notebook first."})
         yield history, ""
         return
 
@@ -98,7 +100,8 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
                     break
         
         if not notebook_id:
-            history.append([message, "❌ Notebook not found on server."])
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": "❌ Notebook not found on server."})
             yield history, ""
             return
 
@@ -110,14 +113,17 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
         
         if res.status_code == 200:
             ans = res.json().get("response", "")
-            history.append([message, ans])
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": ans})
             yield history, ""
         else:
-            history.append([message, f"❌ Error: {res.text}"])
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": f"❌ Error: {res.text}"})
             yield history, ""
 
     except Exception as e:
-        history.append([message, f"❌ Error: {e}"])
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": f"❌ Error: {e}"})
         yield history, ""
 
 def clear_chat():
