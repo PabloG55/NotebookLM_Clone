@@ -339,7 +339,15 @@ with gr.Blocks(title="NotebookLM 🧠") as demo:
                     del_status = gr.Markdown("")
 
             add_btn.click(process_source, inputs=[nb_name, src_type, file_in, url_in], outputs=[add_status, active_nb])
-            rename_btn.click(rename_notebook, inputs=[active_nb, rename_input], outputs=[active_nb, rename_status])
+            rename_btn.click(
+                rename_notebook,
+                inputs=[active_nb, rename_input],
+                outputs=[active_nb, rename_status],
+            ).then(
+                lambda nb: ("", "", get_notebook_info(nb)),
+                inputs=active_nb,
+                outputs=[nb_name, rename_input, nb_info_md],
+            )
             del_btn.click(delete_notebook, inputs=active_nb, outputs=[active_nb, del_status])
 
         # ── TAB 2: CHAT ──────────────────────────────────────────────────────
