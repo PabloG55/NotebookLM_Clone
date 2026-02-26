@@ -129,6 +129,17 @@ class GenerateRequest(BaseModel):
 def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
     """Handles async generation of Summaries, Podcasts, Quizzes, and Study Guides from the full notebook text"""
     
+    # Audio generation doesn't need to query ChromaDB for chunks, it strictly uses the provided script
+    if request.artifact_type == "podcast_audio":
+        from features.podcast import generate_podcast_audio
+        from fastapi.responses import Response
+        # Audio generation just takes the parsed lines directly, it doesn't need to read the notebook from DB
+        parsed_lines = request.params.get("parsed_lines")
+        if not parsed_lines:
+            raise HTTPException(status_code=400, detail="parsed_lines required for audio generation")
+        audio_bytes = generate_podcast_audio(parsed_lines)
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+
     # Verify Notebook Ownership
     notebook = db.query(Notebook).filter(Notebook.notebook_id == request.notebook_id, Notebook.hf_user_id == hf_user_id).first()
     if not notebook:
@@ -160,6 +171,7 @@ def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(verify
     elif request.artifact_type == "podcast_audio":
         from features.podcast import generate_podcast_audio
         from fastapi.responses import Response
+        # Audio generation just takes the parsed lines directly, it doesn't need to read the notebook from DB
         parsed_lines = request.params.get("parsed_lines")
         if not parsed_lines:
             raise HTTPException(status_code=400, detail="parsed_lines required for audio generation")
