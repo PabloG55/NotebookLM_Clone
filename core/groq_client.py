@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MODELS = [
+    "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "llama-3.1-8b-versatile",
     "gemma2-9b-it",
     "mixtral-8x7b-32768",
 ]
@@ -29,6 +29,10 @@ def get_groq_client():
 def _is_rate_limit_error(e) -> bool:
     msg = str(e).lower()
     return "429" in msg or "rate limit" in msg or "rate_limit_exceeded" in msg
+
+def _is_not_found_error(e) -> bool:
+    msg = str(e).lower()
+    return "404" in msg or "does not exist" in msg
 
 
 def _extract_retry_time(e) -> str:
@@ -100,8 +104,8 @@ def groq_chat(
             return response.choices[0].message.content.strip()
 
         except Exception as e:
-            if _is_rate_limit_error(e):
-                print(f"[ThinkBook] Rate limit on {attempt_model}, trying next model...")
+            if _is_rate_limit_error(e) or _is_not_found_error(e):
+                print(f"[ThinkBook] Skipping {attempt_model} (Rate limit or Not Found), trying next model...")
                 errors.append(e)
                 continue
             else:
@@ -141,8 +145,8 @@ def groq_stream(
             return  # success
 
         except Exception as e:
-            if _is_rate_limit_error(e):
-                print(f"[ThinkBook] Rate limit on {attempt_model}, trying next model...")
+            if _is_rate_limit_error(e) or _is_not_found_error(e):
+                print(f"[ThinkBook] Skipping {attempt_model} (Rate limit or Not Found), trying next model...")
                 errors.append(e)
                 continue
             else:
