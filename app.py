@@ -375,7 +375,7 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
 
     # Refresh notebooks list on login and on notebook change
     demo.load(refresh_notebooks, inputs=None, outputs=active_nb)
-    active_nb.change(get_notebook_info, inputs=[active_nb, gr.OAuthProfile()], outputs=nb_info_md)
+    active_nb.change(get_notebook_info, inputs=[active_nb, gr.OAuthProfile], outputs=nb_info_md)
 
     gr.Markdown("---")
 
@@ -423,7 +423,7 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
                 outputs=upload_status,
             ).then(
                 process_source,
-                inputs=[nb_name, src_type, file_in, url_in, gr.OAuthProfile()],
+                inputs=[nb_name, src_type, file_in, url_in, gr.OAuthProfile],
                 outputs=[add_status, active_nb],
             ).then(
                 lambda: "",
@@ -433,12 +433,12 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
 
             rename_btn.click(
                 rename_notebook,
-                inputs=[active_nb, rename_input, gr.OAuthProfile()],
+                inputs=[active_nb, rename_input, gr.OAuthProfile],
                 outputs=[active_nb, rename_status],
             )
             del_btn.click(
                 delete_notebook,
-                inputs=[active_nb, gr.OAuthProfile()],
+                inputs=[active_nb, gr.OAuthProfile],
                 outputs=[active_nb, del_status],
             )
 
@@ -451,8 +451,8 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
                 send_btn = gr.Button("Send ➤", variant="primary", scale=1)
             clr_btn = gr.Button("🗑️ Clear Chat", variant="secondary")
 
-            send_btn.click(chat_response, inputs=[chat_in, chatbot, active_nb, gr.OAuthProfile()], outputs=[chatbot, chat_in])
-            chat_in.submit(chat_response, inputs=[chat_in, chatbot, active_nb, gr.OAuthProfile()], outputs=[chatbot, chat_in])
+            send_btn.click(chat_response, inputs=[chat_in, chatbot, active_nb, gr.OAuthProfile], outputs=[chatbot, chat_in])
+            chat_in.submit(chat_response, inputs=[chat_in, chatbot, active_nb, gr.OAuthProfile], outputs=[chatbot, chat_in])
             clr_btn.click(clear_chat, outputs=[chatbot, chat_in])
 
         # ── TAB 3: SUMMARY ───────────────────────────────────
@@ -465,7 +465,7 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
                 )
                 sum_btn = gr.Button("✨ Generate", variant="primary")
             sum_out = gr.Markdown()
-            sum_btn.click(generate_summary, inputs=[active_nb, sum_mode, gr.OAuthProfile()], outputs=sum_out)
+            sum_btn.click(generate_summary, inputs=[active_nb, sum_mode, gr.OAuthProfile], outputs=sum_out)
 
         # ── TAB 4: PODCAST ───────────────────────────────────
         with gr.TabItem("🎙️ Podcast"):
@@ -485,7 +485,7 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
                 audio_status = gr.Markdown()
             audio_out = gr.Audio(label="🎧 Listen", type="filepath")
 
-            pod_btn.click(generate_podcast, inputs=[active_nb, exchanges_sl, gr.OAuthProfile()], outputs=[pod_script_out, pod_lines_state])
+            pod_btn.click(generate_podcast, inputs=[active_nb, exchanges_sl, gr.OAuthProfile], outputs=[pod_script_out, pod_lines_state])
             audio_btn.click(generate_audio, inputs=pod_lines_state, outputs=[audio_out, audio_status])
 
         # ── TAB 5: QUIZ ──────────────────────────────────────
@@ -509,7 +509,7 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
 
             quiz_gen_btn.click(
                 gen_quiz,
-                inputs=[active_nb, num_q_sl, gr.OAuthProfile()],
+                inputs=[active_nb, num_q_sl, gr.OAuthProfile],
                 outputs=[quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md] + answer_radios,
             )
             submit_btn.click(
@@ -523,7 +523,7 @@ with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
             gr.Markdown("### Key concepts, definitions, flashcards & summary")
             study_btn = gr.Button("📚 Generate Study Guide", variant="primary")
             study_out = gr.Markdown()
-            study_btn.click(get_study_guide, inputs=[active_nb, gr.OAuthProfile()], outputs=study_out)
+            study_btn.click(get_study_guide, inputs=[active_nb, gr.OAuthProfile], outputs=study_out)
 
     gr.Markdown("<center><small>NotebookLM · Powered by Groq · FAISS · Gradio</small></center>")
 
