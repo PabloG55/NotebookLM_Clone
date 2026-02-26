@@ -1,6 +1,7 @@
 """
 ThinkBook - NotebookLM Clone
-Gradio interface — works on HuggingFace Spaces (Gradio SDK).
+Gradio interface with HuggingFace OAuth login.
+Each user gets their own isolated notebooks.
 """
 import fix_gradio  # patches gradio_client bug
 import gradio as gr
@@ -21,25 +22,47 @@ from features.quiz import generate_quiz, check_answer
 from features.study_guide import generate_study_guide
 from core.groq_client import groq_stream
 
-# Global state — persists within one session
+# Global state keyed by HF username
+# { "username": { "notebook_name": {"text": str, "store": VectorStore} } }
 NOTEBOOKS: dict = {}
 
 MAX_QUIZ_Q = 10
 
 
 # ══════════════════════════════════════════════════════════════
+# HELPERS
+# ══════════════════════════════════════════════════════════════
+
+def get_uid(profile: gr.OAuthProfile | None) -> str | None:
+    return profile.username if profile else None
+
+def user_notebooks(profile: gr.OAuthProfile | None) -> dict:
+    uid = get_uid(profile)
+    if not uid:
+        return {}
+    if uid not in NOTEBOOKS:
+        NOTEBOOKS[uid] = {}
+    return NOTEBOOKS[uid]
+
+def nb_choices(profile: gr.OAuthProfile | None) -> list:
+    return list(user_notebooks(profile).keys())
+
+
+# ══════════════════════════════════════════════════════════════
 # NOTEBOOK MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 
-def process_source(notebook_name, source_type, file_obj, url_text):
-    global NOTEBOOKS
+def process_source(notebook_name, source_type, file_obj, url_text, profile: gr.OAuthProfile | None):
+    if not get_uid(profile):
+        return "❌ Please log in with HuggingFace first.", gr.Dropdown(choices=[])
+    nbs = user_notebooks(profile)
     name = notebook_name.strip()
     if not name:
-        return "❌ Please enter a notebook name.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+        return "❌ Please enter a notebook name.", gr.Dropdown(choices=list(nbs.keys()))
     try:
         if source_type in ["PDF", "PPTX", "TXT"]:
             if not file_obj:
-                return "❌ Please upload at least one file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+                return "❌ Please upload at least one file.", gr.Dropdown(choices=list(nbs.keys()))
             files = file_obj if isinstance(file_obj, list) else [file_obj]
             all_text = []
             for f in files:
@@ -59,97 +82,107 @@ def process_source(notebook_name, source_type, file_obj, url_text):
                 except Exception as e:
                     print(f"Skipping {f.name}: {e}")
             if not all_text:
-                return "❌ Could not extract text from any file.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+                return "❌ Could not extract text from any file.", gr.Dropdown(choices=list(nbs.keys()))
             new_text = "\n\n---\n\n".join(all_text)
         else:
             if not url_text.strip():
-                return "❌ Please enter a URL.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+                return "❌ Please enter a URL.", gr.Dropdown(choices=list(nbs.keys()))
             new_text = ingest_source("url", url_text.strip())
 
         if not new_text or len(new_text.strip()) < 50:
-            return "❌ Could not extract enough text.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+            return "❌ Could not extract enough text.", gr.Dropdown(choices=list(nbs.keys()))
 
         file_count = len(files) if source_type in ["PDF", "PPTX", "TXT"] else 1
 
-        # If notebook already exists → APPEND to it
-        if name in NOTEBOOKS:
-            combined_text = NOTEBOOKS[name]["text"] + "\n\n---\n\n" + new_text
+        # Append if notebook exists, else create new
+        if name in nbs:
+            combined_text = nbs[name]["text"] + "\n\n---\n\n" + new_text
             chunks = chunk_text(combined_text)
             store = VectorStore()
             store.add_chunks(chunks)
-            NOTEBOOKS[name] = {"text": combined_text, "store": store}
-            choices = list(NOTEBOOKS.keys())
+            NOTEBOOKS[get_uid(profile)][name] = {"text": combined_text, "store": store}
+            choices = list(user_notebooks(profile).keys())
             return (
                 f"➕ **{name}** updated! Added {file_count} file(s) · Now {len(chunks)} chunks · {len(combined_text.split()):,} words total.",
                 gr.Dropdown(choices=choices, value=name)
             )
         else:
-            # New notebook
             chunks = chunk_text(new_text)
             store = VectorStore()
             store.add_chunks(chunks)
-            NOTEBOOKS[name] = {"text": new_text, "store": store}
-            choices = list(NOTEBOOKS.keys())
+            NOTEBOOKS[get_uid(profile)][name] = {"text": new_text, "store": store}
+            choices = list(user_notebooks(profile).keys())
             return (
                 f"✅ **{name}** created! {file_count} file(s) · {len(chunks)} chunks · {len(new_text.split()):,} words.",
                 gr.Dropdown(choices=choices, value=name)
             )
     except Exception as e:
-        return f"❌ Error: {e}", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
+        return f"❌ Error: {e}", gr.Dropdown(choices=list(user_notebooks(profile).keys()))
 
 
-def delete_notebook(notebook_name):
-    global NOTEBOOKS
-    if notebook_name and notebook_name in NOTEBOOKS:
-        del NOTEBOOKS[notebook_name]
-    choices = list(NOTEBOOKS.keys())
+def delete_notebook(notebook_name, profile: gr.OAuthProfile | None):
+    if not get_uid(profile):
+        return gr.Dropdown(choices=[]), "❌ Not logged in."
+    nbs = user_notebooks(profile)
+    if notebook_name and notebook_name in nbs:
+        del NOTEBOOKS[get_uid(profile)][notebook_name]
+    choices = list(user_notebooks(profile).keys())
     return gr.Dropdown(choices=choices, value=choices[0] if choices else None), "🗑️ Deleted."
 
 
-def rename_notebook(old_name, new_name):
-    global NOTEBOOKS
+def rename_notebook(old_name, new_name, profile: gr.OAuthProfile | None):
+    if not get_uid(profile):
+        return gr.Dropdown(choices=[]), "❌ Not logged in."
+    nbs = user_notebooks(profile)
     new_name = new_name.strip()
-    if not old_name or old_name not in NOTEBOOKS:
-        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), "❌ Select a notebook to rename."
+    if not old_name or old_name not in nbs:
+        return gr.Dropdown(choices=list(nbs.keys())), "❌ Select a notebook to rename."
     if not new_name:
-        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), "❌ Enter a new name."
-    if new_name in NOTEBOOKS:
-        return gr.Dropdown(choices=list(NOTEBOOKS.keys())), f"❌ '{new_name}' already exists."
-    NOTEBOOKS[new_name] = NOTEBOOKS.pop(old_name)
-    choices = list(NOTEBOOKS.keys())
+        return gr.Dropdown(choices=list(nbs.keys())), "❌ Enter a new name."
+    if new_name in nbs:
+        return gr.Dropdown(choices=list(nbs.keys())), f"❌ '{new_name}' already exists."
+    NOTEBOOKS[get_uid(profile)][new_name] = NOTEBOOKS[get_uid(profile)].pop(old_name)
+    choices = list(user_notebooks(profile).keys())
     return gr.Dropdown(choices=choices, value=new_name), f"✅ Renamed to '{new_name}'."
 
 
-def get_notebook_info(notebook_name):
-    if not notebook_name or notebook_name not in NOTEBOOKS:
-        return "No notebook selected."
-    text = NOTEBOOKS[notebook_name]["text"]
-    return f"📊 **{notebook_name}** · {len(text.split()):,} words"
+def get_notebook_info(notebook_name, profile: gr.OAuthProfile | None):
+    uid = get_uid(profile)
+    if not uid:
+        return "👤 Please log in to use ThinkBook."
+    nbs = user_notebooks(profile)
+    if not notebook_name or notebook_name not in nbs:
+        return f"👋 Welcome **{uid}**! No notebook selected."
+    text = nbs[notebook_name]["text"]
+    return f"👤 **{uid}** · 📊 **{notebook_name}** · {len(text.split()):,} words"
+
+
+def refresh_notebooks(profile: gr.OAuthProfile | None):
+    choices = nb_choices(profile)
+    return gr.Dropdown(choices=choices, value=choices[0] if choices else None)
 
 
 # ══════════════════════════════════════════════════════════════
 # CHAT
 # ══════════════════════════════════════════════════════════════
 
-def chat_response(message, history, notebook_name):
+def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | None):
+    history = history or []
+    if not get_uid(profile):
+        history.append({"role": "assistant", "content": "❌ Please log in first."})
+        return history, ""
     if not message.strip():
         return history, ""
-
-    history = history or []
-
-    if not notebook_name or notebook_name not in NOTEBOOKS:
+    nbs = user_notebooks(profile)
+    if not notebook_name or notebook_name not in nbs:
         history.append({"role": "assistant", "content": "❌ Please select a notebook first."})
         return history, ""
-
-    store = NOTEBOOKS[notebook_name]["store"]
-
+    store = nbs[notebook_name]["store"]
     from features.chat import build_rag_messages
     messages = build_rag_messages(message, store, history)
-
     full_response = ""
     for token in groq_stream(messages, temperature=0.6, max_tokens=2048):
         full_response += token
-
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": full_response})
     return history, ""
@@ -163,11 +196,14 @@ def clear_chat():
 # SUMMARY
 # ══════════════════════════════════════════════════════════════
 
-def generate_summary(notebook_name, mode):
-    if not notebook_name or notebook_name not in NOTEBOOKS:
+def generate_summary(notebook_name, mode, profile: gr.OAuthProfile | None):
+    if not get_uid(profile):
+        return "❌ Please log in first."
+    nbs = user_notebooks(profile)
+    if not notebook_name or notebook_name not in nbs:
         return "❌ Please select a notebook first."
     try:
-        return summarize(NOTEBOOKS[notebook_name]["text"], mode=mode.lower())
+        return summarize(nbs[notebook_name]["text"], mode=mode.lower())
     except Exception as e:
         return f"❌ Error: {e}"
 
@@ -176,11 +212,14 @@ def generate_summary(notebook_name, mode):
 # PODCAST
 # ══════════════════════════════════════════════════════════════
 
-def generate_podcast(notebook_name, num_exchanges):
-    if not notebook_name or notebook_name not in NOTEBOOKS:
+def generate_podcast(notebook_name, num_exchanges, profile: gr.OAuthProfile | None):
+    if not get_uid(profile):
+        return "❌ Please log in first.", None
+    nbs = user_notebooks(profile)
+    if not notebook_name or notebook_name not in nbs:
         return "❌ Please select a notebook first.", None
     try:
-        script = generate_podcast_script(NOTEBOOKS[notebook_name]["text"], int(num_exchanges))
+        script = generate_podcast_script(nbs[notebook_name]["text"], int(num_exchanges))
         lines = parse_podcast_script(script)
         if not lines:
             return "❌ Could not parse script. Try again.", None
@@ -222,14 +261,15 @@ def render_quiz_md(quiz):
     return out
 
 
-def gen_quiz(notebook_name, num_q):
-    if not notebook_name or notebook_name not in NOTEBOOKS:
-        return (
-            "❌ Select a notebook first.", "{}", "", "",
-            *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
-        )
+def gen_quiz(notebook_name, num_q, profile: gr.OAuthProfile | None):
+    empty = [gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
+    if not get_uid(profile):
+        return ("❌ Please log in first.", "{}", "", "", *empty)
+    nbs = user_notebooks(profile)
+    if not notebook_name or notebook_name not in nbs:
+        return ("❌ Select a notebook first.", "{}", "", "", *empty)
     try:
-        quiz = generate_quiz(NOTEBOOKS[notebook_name]["text"], num_questions=int(num_q))
+        quiz = generate_quiz(nbs[notebook_name]["text"], num_questions=int(num_q))
         quiz_json = json.dumps(quiz)
         n = int(num_q)
         radio_updates = []
@@ -243,23 +283,13 @@ def gen_quiz(notebook_name, num_q):
                         f"C: {q['options'].get('C', '')}",
                         f"D: {q['options'].get('D', '')}",
                     ],
-                    value=None,
-                    visible=True,
+                    value=None, visible=True,
                 ))
             else:
                 radio_updates.append(gr.update(visible=False, value=None))
-        return (
-            "✅ Quiz ready! Select your answers below.",
-            quiz_json,
-            render_quiz_md(quiz),
-            "",
-            *radio_updates
-        )
+        return ("✅ Quiz ready! Select your answers below.", quiz_json, render_quiz_md(quiz), "", *radio_updates)
     except Exception as e:
-        return (
-            f"❌ Error: {e}", "{}", "", "",
-            *[gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
-        )
+        return (f"❌ Error: {e}", "{}", "", "", *empty)
 
 
 def submit_quiz(quiz_json, *answers):
@@ -293,11 +323,14 @@ def submit_quiz(quiz_json, *answers):
 # STUDY GUIDE
 # ══════════════════════════════════════════════════════════════
 
-def get_study_guide(notebook_name):
-    if not notebook_name or notebook_name not in NOTEBOOKS:
+def get_study_guide(notebook_name, profile: gr.OAuthProfile | None):
+    if not get_uid(profile):
+        return "❌ Please log in first."
+    nbs = user_notebooks(profile)
+    if not notebook_name or notebook_name not in nbs:
         return "❌ Please select a notebook first."
     try:
-        return generate_study_guide(NOTEBOOKS[notebook_name]["text"])
+        return generate_study_guide(nbs[notebook_name]["text"])
     except Exception as e:
         return f"❌ Error: {e}"
 
@@ -333,20 +366,23 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
         elem_id="title",
     )
 
+    gr.LoginButton()
+
     with gr.Row():
         active_nb = gr.Dropdown(choices=[], label="📚 Active Notebook", interactive=True, scale=4)
-        nb_info_md = gr.Markdown("_No notebook loaded yet_")
+        nb_info_md = gr.Markdown("_Please log in to continue._")
 
-    active_nb.change(get_notebook_info, inputs=active_nb, outputs=nb_info_md)
+    demo.load(refresh_notebooks, inputs=None, outputs=active_nb)
+    active_nb.change(get_notebook_info, inputs=[active_nb, gr.OAuthProfile()], outputs=nb_info_md)
 
     gr.Markdown("---")
 
     with gr.Tabs():
 
-        # ── TAB 1: NOTEBOOKS ─────────────────────────────────────────────────
+        # ── TAB 1: NOTEBOOKS ─────────────────────────────────
         with gr.TabItem("📁 Notebooks"):
             gr.Markdown("### ➕ Add / Append to Notebook")
-            gr.Markdown("_Type an existing notebook name to **add more files** to it, or a new name to **create** one._")
+            gr.Markdown("_Type an existing notebook name to **add more files** to it, or a new name to **create** one. After each upload the file box clears — just drop more files in!_")
             with gr.Row():
                 with gr.Column():
                     nb_name = gr.Textbox(label="Notebook Name", placeholder="e.g. Biology Notes")
@@ -355,14 +391,17 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                         label="Upload Files (hold Ctrl/Cmd to select multiple)",
                         file_types=[".pdf", ".pptx", ".ppt", ".txt", ".md"],
                         file_count="multiple",
+                        height=150,
                     )
                     url_in = gr.Textbox(label="URL", placeholder="https://...", visible=False)
 
                     def toggle(t):
-                        return gr.File(visible=t != "URL", file_count="multiple"), gr.Textbox(visible=t == "URL")
+                        return gr.File(visible=t != "URL", file_count="multiple", height=150), gr.Textbox(visible=t == "URL")
                     src_type.change(toggle, inputs=src_type, outputs=[file_in, url_in])
 
-                    add_btn = gr.Button("🚀 Process & Add", variant="primary")
+                    with gr.Row():
+                        add_btn = gr.Button("🚀 Process & Add", variant="primary", scale=3)
+                        fill_btn = gr.Button("📂 Add More to Selected", variant="secondary", scale=2)
                     upload_status = gr.Markdown("")
 
                 with gr.Column():
@@ -379,29 +418,40 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                     del_btn = gr.Button("Delete Selected Notebook", variant="stop")
                     del_status = gr.Markdown("")
 
-            # Upload animation using .then() chaining
+            # Process & Add — clears file input after done so it's ready for more
             add_btn.click(
                 lambda: "<span class='uploading'>⏳ Processing files... please wait.</span>",
                 inputs=None,
                 outputs=upload_status,
             ).then(
                 process_source,
-                inputs=[nb_name, src_type, file_in, url_in],
+                inputs=[nb_name, src_type, file_in, url_in, gr.OAuthProfile()],
                 outputs=[add_status, active_nb],
             ).then(
-                lambda: "",
+                lambda: ("", None),
                 inputs=None,
-                outputs=upload_status,
+                outputs=[upload_status, file_in],
+            )
+
+            # Fill notebook name from active selection so user can keep adding
+            fill_btn.click(
+                lambda nb: nb,
+                inputs=active_nb,
+                outputs=nb_name,
             )
 
             rename_btn.click(
                 rename_notebook,
-                inputs=[active_nb, rename_input],
+                inputs=[active_nb, rename_input, gr.OAuthProfile()],
                 outputs=[active_nb, rename_status],
             )
-            del_btn.click(delete_notebook, inputs=active_nb, outputs=[active_nb, del_status])
+            del_btn.click(
+                delete_notebook,
+                inputs=[active_nb, gr.OAuthProfile()],
+                outputs=[active_nb, del_status],
+            )
 
-        # ── TAB 2: CHAT ──────────────────────────────────────────────────────
+        # ── TAB 2: CHAT ──────────────────────────────────────
         with gr.TabItem("💬 Chat"):
             gr.Markdown("### Ask anything about your document")
             chatbot = gr.Chatbot(label="ThinkBook AI", height=450, bubble_full_width=False, type="messages")
@@ -410,11 +460,11 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                 send_btn = gr.Button("Send ➤", variant="primary", scale=1)
             clr_btn = gr.Button("🗑️ Clear Chat", variant="secondary")
 
-            send_btn.click(chat_response, inputs=[chat_in, chatbot, active_nb], outputs=[chatbot, chat_in])
-            chat_in.submit(chat_response, inputs=[chat_in, chatbot, active_nb], outputs=[chatbot, chat_in])
+            send_btn.click(chat_response, inputs=[chat_in, chatbot, active_nb, gr.OAuthProfile()], outputs=[chatbot, chat_in])
+            chat_in.submit(chat_response, inputs=[chat_in, chatbot, active_nb, gr.OAuthProfile()], outputs=[chatbot, chat_in])
             clr_btn.click(clear_chat, outputs=[chatbot, chat_in])
 
-        # ── TAB 3: SUMMARY ───────────────────────────────────────────────────
+        # ── TAB 3: SUMMARY ───────────────────────────────────
         with gr.TabItem("📝 Summary"):
             gr.Markdown("### Generate a document summary")
             with gr.Row():
@@ -424,9 +474,9 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                 )
                 sum_btn = gr.Button("✨ Generate", variant="primary")
             sum_out = gr.Markdown()
-            sum_btn.click(generate_summary, inputs=[active_nb, sum_mode], outputs=sum_out)
+            sum_btn.click(generate_summary, inputs=[active_nb, sum_mode, gr.OAuthProfile()], outputs=sum_out)
 
-        # ── TAB 4: PODCAST ───────────────────────────────────────────────────
+        # ── TAB 4: PODCAST ───────────────────────────────────
         with gr.TabItem("🎙️ Podcast"):
             gr.Markdown("""
 ### 2-person podcast from your document
@@ -444,10 +494,10 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                 audio_status = gr.Markdown()
             audio_out = gr.Audio(label="🎧 Listen", type="filepath")
 
-            pod_btn.click(generate_podcast, inputs=[active_nb, exchanges_sl], outputs=[pod_script_out, pod_lines_state])
+            pod_btn.click(generate_podcast, inputs=[active_nb, exchanges_sl, gr.OAuthProfile()], outputs=[pod_script_out, pod_lines_state])
             audio_btn.click(generate_audio, inputs=pod_lines_state, outputs=[audio_out, audio_status])
 
-        # ── TAB 5: QUIZ ──────────────────────────────────────────────────────
+        # ── TAB 5: QUIZ ──────────────────────────────────────
         with gr.TabItem("🧪 Quiz"):
             gr.Markdown("### Test your knowledge")
             with gr.Row():
@@ -468,7 +518,7 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
 
             quiz_gen_btn.click(
                 gen_quiz,
-                inputs=[active_nb, num_q_sl],
+                inputs=[active_nb, num_q_sl, gr.OAuthProfile()],
                 outputs=[quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md] + answer_radios,
             )
             submit_btn.click(
@@ -477,12 +527,12 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                 outputs=quiz_results_md,
             )
 
-        # ── TAB 6: STUDY GUIDE ───────────────────────────────────────────────
+        # ── TAB 6: STUDY GUIDE ───────────────────────────────
         with gr.TabItem("📚 Study Guide"):
             gr.Markdown("### Key concepts, definitions, flashcards & summary")
             study_btn = gr.Button("📚 Generate Study Guide", variant="primary")
             study_out = gr.Markdown()
-            study_btn.click(get_study_guide, inputs=active_nb, outputs=study_out)
+            study_btn.click(get_study_guide, inputs=[active_nb, gr.OAuthProfile()], outputs=study_out)
 
     gr.Markdown("<center><small>Powered by Groq · FAISS · Gradio</small></center>")
 
