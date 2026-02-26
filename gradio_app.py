@@ -78,17 +78,15 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
     history = history or []
 
     if not profile:
-        history.append({"role": "assistant", "content": "❌ Please log in first."})
+        history.append([message, "❌ Please log in first."])
         yield history, ""
         return
 
     if not notebook_name:
-        history.append({"role": "assistant", "content": "❌ Please select a notebook first."})
+        history.append([message, "❌ Please select a notebook first."])
         yield history, ""
         return
 
-    # To connect names to IDs properly we'd fetch the notebook list here
-    # Assuming notebook_name is actually the notebook_id or handled by the backend
     try:
         # First get the notebook ID from the name
         res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile))
@@ -100,7 +98,7 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
                     break
         
         if not notebook_id:
-            history.append({"role": "assistant", "content": "❌ Notebook not found on server."})
+            history.append([message, "❌ Notebook not found on server."])
             yield history, ""
             return
 
@@ -112,17 +110,14 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
         
         if res.status_code == 200:
             ans = res.json().get("response", "")
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": ans})
+            history.append([message, ans])
             yield history, ""
         else:
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": f"❌ Error: {res.text}"})
+            history.append([message, f"❌ Error: {res.text}"])
             yield history, ""
 
     except Exception as e:
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": f"❌ Error: {e}"})
+        history.append([message, f"❌ Error: {e}"])
         yield history, ""
 
 def clear_chat():
@@ -257,7 +252,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
         # ── TAB 2: CHAT ──────────────────────────────────────────────────────
         with gr.TabItem("💬 Chat"):
             gr.Markdown("### Ask anything about your document")
-            chatbot = gr.Chatbot(label="ThinkBook AI", height=450, type="messages")
+            chatbot = gr.Chatbot(label="ThinkBook AI", height=450)
             with gr.Row():
                 chat_in = gr.Textbox(placeholder="Ask a question...", label="", scale=5, show_label=False)
                 send_btn = gr.Button("Send ➤", variant="primary", scale=1)
