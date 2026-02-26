@@ -359,19 +359,21 @@ footer { display: none !important; }
 .uploading { animation: pulse 1.2s ease-in-out infinite; color: #f0a500; font-weight: bold; font-size: 1rem; }
 """
 
-with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
+with gr.Blocks(title="NotebookLM 🧠", css=css) as demo:
 
     gr.Markdown(
-        "# 🧠 ThinkBook\nUpload any document · Chat · Summarize · Podcast · Quiz · Study Guide",
+        "# 🧠 NotebookLM\nUpload any document · Chat · Summarize · Podcast · Quiz · Study Guide",
         elem_id="title",
     )
 
+    # ── LOGIN BUTTON ─────────────────────────────────────────
     gr.LoginButton()
 
     with gr.Row():
         active_nb = gr.Dropdown(choices=[], label="📚 Active Notebook", interactive=True, scale=4)
         nb_info_md = gr.Markdown("_Please log in to continue._")
 
+    # Refresh notebooks list on login and on notebook change
     demo.load(refresh_notebooks, inputs=None, outputs=active_nb)
     active_nb.change(get_notebook_info, inputs=[active_nb, gr.OAuthProfile()], outputs=nb_info_md)
 
@@ -382,7 +384,7 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
         # ── TAB 1: NOTEBOOKS ─────────────────────────────────
         with gr.TabItem("📁 Notebooks"):
             gr.Markdown("### ➕ Add / Append to Notebook")
-            gr.Markdown("_Type an existing notebook name to **add more files** to it, or a new name to **create** one. After each upload the file box clears — just drop more files in!_")
+            gr.Markdown("_Type an existing notebook name to **add more files** to it, or a new name to **create** one._")
             with gr.Row():
                 with gr.Column():
                     nb_name = gr.Textbox(label="Notebook Name", placeholder="e.g. Biology Notes")
@@ -391,17 +393,14 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                         label="Upload Files (hold Ctrl/Cmd to select multiple)",
                         file_types=[".pdf", ".pptx", ".ppt", ".txt", ".md"],
                         file_count="multiple",
-                        height=150,
                     )
                     url_in = gr.Textbox(label="URL", placeholder="https://...", visible=False)
 
                     def toggle(t):
-                        return gr.File(visible=t != "URL", file_count="multiple", height=150), gr.Textbox(visible=t == "URL")
+                        return gr.File(visible=t != "URL", file_count="multiple"), gr.Textbox(visible=t == "URL")
                     src_type.change(toggle, inputs=src_type, outputs=[file_in, url_in])
 
-                    with gr.Row():
-                        add_btn = gr.Button("🚀 Process & Add", variant="primary", scale=3)
-                        fill_btn = gr.Button("📂 Add More to Selected", variant="secondary", scale=2)
+                    add_btn = gr.Button("🚀 Process & Add", variant="primary")
                     upload_status = gr.Markdown("")
 
                 with gr.Column():
@@ -418,7 +417,6 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                     del_btn = gr.Button("Delete Selected Notebook", variant="stop")
                     del_status = gr.Markdown("")
 
-            # Process & Add — clears file input after done so it's ready for more
             add_btn.click(
                 lambda: "<span class='uploading'>⏳ Processing files... please wait.</span>",
                 inputs=None,
@@ -428,16 +426,9 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
                 inputs=[nb_name, src_type, file_in, url_in, gr.OAuthProfile()],
                 outputs=[add_status, active_nb],
             ).then(
-                lambda: ("", None),
+                lambda: "",
                 inputs=None,
-                outputs=[upload_status, file_in],
-            )
-
-            # Fill notebook name from active selection so user can keep adding
-            fill_btn.click(
-                lambda nb: nb,
-                inputs=active_nb,
-                outputs=nb_name,
+                outputs=upload_status,
             )
 
             rename_btn.click(
@@ -454,7 +445,7 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
         # ── TAB 2: CHAT ──────────────────────────────────────
         with gr.TabItem("💬 Chat"):
             gr.Markdown("### Ask anything about your document")
-            chatbot = gr.Chatbot(label="ThinkBook AI", height=450, bubble_full_width=False, type="messages")
+            chatbot = gr.Chatbot(label="NotebookLM AI", height=450, bubble_full_width=False, type="messages")
             with gr.Row():
                 chat_in = gr.Textbox(placeholder="Ask a question...", label="", scale=5, show_label=False)
                 send_btn = gr.Button("Send ➤", variant="primary", scale=1)
@@ -534,7 +525,7 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
             study_out = gr.Markdown()
             study_btn.click(get_study_guide, inputs=[active_nb, gr.OAuthProfile()], outputs=study_out)
 
-    gr.Markdown("<center><small>Powered by Groq · FAISS · Gradio</small></center>")
+    gr.Markdown("<center><small>NotebookLM · Powered by Groq · FAISS · Gradio</small></center>")
 
 if __name__ == "__main__":
     demo.launch()
