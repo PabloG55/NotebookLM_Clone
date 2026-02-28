@@ -6,7 +6,8 @@ import json
 
 # Models and DB
 from core.database import get_db, Notebook, Document, ChatMessage, Artifact
-from core.storage_manager import save_raw_file, get_chroma_db_dir, delete_notebook_storage
+from core.storage_manager import save_raw_file, get_chroma_db_dir, delete_notebook_storage, get_notebook_subdir
+import os
 from core.vector_store import VectorStore
 # Specific feature logic
 from core.chunker import chunk_text
@@ -23,8 +24,33 @@ def verify_hf_user(x_hf_user: str = Header(None)) -> str:
 @app.get("/api/notebooks")
 def list_notebooks(hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
     """Fetch all notebooks for the authenticated user"""
-    notebooks = db.query(Notebook).filter(Notebook.hf_user_id == hf_user_id).all()
+    notebooks = db.query(Notebook).filter(Notebook.hf_user_id == hf_user_id).order_by(Notebook.created_at.desc()).all()
     return [{"id": nb.notebook_id, "title": nb.title} for nb in notebooks]
+
+@app.get("/api/notebooks/{notebook_id}/files")
+def get_notebook_files(notebook_id: str, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
+    """Fetch physical absolute paths of all uploaded raw files to render in Gradio"""
+    notebook = db.query(Notebook).filter(Notebook.notebook_id == notebook_id, Notebook.hf_user_id == hf_user_id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+        
+    raw_dir = get_notebook_subdir(hf_user_id, notebook.notebook_id, "files_raw")
+    if not os.path.exists(raw_dir):
+        return []
+    
+    files = [os.path.join(raw_dir, f) for f in os.listdir(raw_dir) if os.path.isfile(os.path.join(raw_dir, f))]
+    return files
+
+@app.get("/api/notebooks/{notebook_id}/chats")
+def get_notebook_chats(notebook_id: str, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
+    """Fetch all history to hydrate Gradio ChatComponent"""
+    notebook = db.query(Notebook).filter(Notebook.notebook_id == notebook_id, Notebook.hf_user_id == hf_user_id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+        
+    history_records = db.query(ChatMessage).filter(ChatMessage.notebook_id == notebook_id).order_by(ChatMessage.created_at).all()
+    history = [{"role": msg.role, "content": msg.content} for msg in history_records]
+    return history
 
 @app.post("/api/upload")
 async def upload_document(

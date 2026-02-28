@@ -230,10 +230,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                 rename_in = gr.Textbox(placeholder="New name...", show_label=False, scale=3)
                 rename_btn = gr.Button("✏️ Rename", size="sm", scale=1)
 
-    def get_notebook_info(nb_name):
-        return f"Selected: **{nb_name}**" if nb_name else "No notebook selected."
-        
-    active_nb.change(get_notebook_info, inputs=active_nb, outputs=nb_info_md)
+    # Function moved to end of blocks to reference file_in and chatbot
 
     def rename_notebook_ui(notebook_name, new_name, profile: gr.OAuthProfile | None):
         if not profile or not notebook_name or not new_name.strip(): 
@@ -366,6 +363,32 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             study_out = gr.Markdown()
             def load_study(): return "⏳ Generating Study Guide..."
             study_btn.click(load_study, None, study_out).then(generate_study_guide, inputs=[active_nb], outputs=study_out)
+
+    def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
+        if not nb_name or not profile:
+            return "No notebook selected.", None, []
+            
+        res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+        nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == nb_name), None)
+        
+        if not nb_id:
+            return "❌ Notebook not found.", None, []
+            
+        # Fetch uploaded files
+        res_files = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/files", headers=get_headers(profile))
+        files = res_files.json() if res_files.status_code == 200 else None
+        
+        # Fetch chat history
+        res_chats = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/chats", headers=get_headers(profile))
+        chats = res_chats.json() if res_chats.status_code == 200 else []
+        
+        return f"Selected: **{nb_name}**", files, chats
+
+    active_nb.change(
+        load_notebook_data, 
+        inputs=[active_nb], 
+        outputs=[nb_info_md, file_in, chatbot]
+    )
 
     # Trigger load when page opens to fetch profile and notebooks
     demo.load(fetch_notebooks, inputs=None, outputs=active_nb)
