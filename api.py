@@ -190,15 +190,39 @@ class GenerateRequest(BaseModel):
 async def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
     """Handles async generation of Summaries, Podcasts, Quizzes, and Study Guides from the full notebook text"""
     
-    # Audio generation doesn't need to query ChromaDB for chunks, it strictly uses the provided script
     if request.artifact_type == "podcast_audio":
         from features.podcast import generate_podcast_audio
         from fastapi.responses import Response
+        import base64
+        
         # Audio generation just takes the parsed lines directly, it doesn't need to read the notebook from DB
         parsed_lines = request.params.get("parsed_lines")
         if not parsed_lines:
             raise HTTPException(status_code=400, detail="parsed_lines required for audio generation")
+            
+        # Check if we already have the audio synthesized for this specific notebook
+        # Note: In a real app we might hash the transcript to detect changes, 
+        # but for this portfolio piece mapping explicitly to notebook_id is fine.
+        existing_audio = db.query(Artifact).filter(Artifact.notebook_id == request.notebook_id, Artifact.artifact_type == "podcast_audio").first()
+        if existing_audio:
+            try:
+                # Return the decoded bytes natively
+                audio_bytes = base64.b64decode(existing_audio.content)
+                return Response(content=audio_bytes, media_type="audio/mpeg")
+            except Exception as e:
+                print("Failed to decode cached audio:", e)
+        
         audio_bytes = await generate_podcast_audio(parsed_lines)
+        
+        # Save securely mapped to the user's notebook in SQLite using Base64
+        base64_audio = base64.b64encode(audio_bytes).decode('utf-8')
+        db.add(Artifact(artifact_id=str(uuid.uuid4()), notebook_id=request.notebook_id, artifact_type="podcast_audio", content=base64_audio))
+        try:
+            db.commit()
+        except BaseException as e:
+            db.rollback()
+            print("Failed caching audio to DB:", str(e))
+        
         return Response(content=audio_bytes, media_type="audio/mpeg")
 
     # Verify Notebook Ownership

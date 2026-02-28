@@ -159,11 +159,19 @@ def generate_podcast(notebook_name, exchanges, profile: gr.OAuthProfile | None):
     d = res.json()
     return d.get("script", ""), d.get("parsed_lines", [])
 
-def generate_audio(parsed_lines, profile: gr.OAuthProfile | None):
+def generate_audio(parsed_lines, notebook_name, profile: gr.OAuthProfile | None):
     if not parsed_lines: return None, "❌ No script generated yet."
-    if not profile: return None, "❌ Log in to hear audio."
-    # We fake the notebook ID here just to pass the auth structure since the audio endpoint uses the script
-    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": "dummy", "artifact_type": "podcast_audio", "params": {"parsed_lines": parsed_lines}})
+    if not profile or not notebook_name: return None, "❌ Log in and select a notebook."
+    
+    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+    if not nb_id: return None, "❌ Notebook not found."
+
+    res = requests.post(
+        f"{API_BASE_URL}/api/generate", 
+        headers=get_headers(profile), 
+        json={"notebook_id": nb_id, "artifact_type": "podcast_audio", "params": {"parsed_lines": parsed_lines}}
+    )
     if res.status_code != 200: return None, f"❌ Error: {res.text}"
     
     import tempfile
@@ -220,15 +228,15 @@ def generate_study_guide(notebook_name, profile: gr.OAuthProfile | None):
     return res.json().get("result", f"❌ Error: {res.text}")
 
 def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
-    # Default empties for 9 UI components
+    # Default empties for 10 UI components
     if not nb_name or not profile:
-        return "No notebook selected.", None, [], "", "", None, "", "{}", ""
+        return "No notebook selected.", None, [], "", "", None, "", "{}", "", None
         
     res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
     nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == nb_name), None)
     
     if not nb_id:
-        return "❌ Notebook not found.", None, [], "", "", None, "", "{}", ""
+        return "❌ Notebook not found.", None, [], "", "", None, "", "{}", "", None
         
     # Fetch uploaded files
     res_files = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/files", headers=get_headers(profile))
@@ -258,7 +266,23 @@ def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
             
     study_val = next((v for k, v in artifacts.items() if k.startswith("study_guide")), "")
     
-    return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val
+    # Audio uses a different DB persistence pattern (raw bytes as text in our simple mapping), 
+    # but since we serve it as a file path in Gradio, we must write it to a tempfile if it exists.
+    audio_val = None
+    audio_b64 = next((v for k, v in artifacts.items() if k.startswith("podcast_audio")), None)
+    if audio_b64:
+        import base64
+        import tempfile
+        try:
+            audio_bytes = base64.b64decode(audio_b64)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+                f.write(audio_bytes)
+                audio_val = f.name
+        except Exception as e:
+            print("Failed to decode cached audio", e)
+            pass
+    
+    return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val, audio_val
 
 # ==========================================
 # UI Build
@@ -385,7 +409,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             pod_btn.click(load_pod, None, [pod_script_out, pod_lines_state]).then(generate_podcast, inputs=[active_nb, exchanges_sl], outputs=[pod_script_out, pod_lines_state])
             
             def load_audio(): return None, "⏳ Synthesizing Audio..."
-            audio_btn.click(load_audio, None, [audio_out, audio_status]).then(generate_audio, inputs=pod_lines_state, outputs=[audio_out, audio_status])
+            audio_btn.click(load_audio, None, [audio_out, audio_status]).then(generate_audio, inputs=[pod_lines_state, active_nb], outputs=[audio_out, audio_status])
 
         # ── TAB 5: QUIZ ──────────────────────────────────────────────────────
         with gr.TabItem("🧪 Quiz"):
@@ -433,7 +457,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     active_nb.change(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out]
     )
 
     add_btn.click(
@@ -445,7 +469,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     ).then(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out]
     )
 
     append_btn.click(
@@ -457,7 +481,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     ).then(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out]
     )
 
     # Trigger load when page opens to fetch profile and notebooks
