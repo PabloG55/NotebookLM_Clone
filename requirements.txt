@@ -3,7 +3,7 @@ httpx==0.27.2
 chromadb>=0.6.0
 SQLAlchemy>=2.0.32
 sentence-transformers==2.7.0
-gradio
+gradio[oauth]
 huggingface_hub
 pymupdf>=1.24.2
 python-pptx==0.6.23
