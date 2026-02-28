@@ -72,7 +72,10 @@ def process_source(notebook_name, source_type, file_obj, url_text):
             return "❌ Could not extract enough text.", gr.Dropdown(choices=list(NOTEBOOKS.keys()))
 
         chunks = chunk_text(raw_text)
-        store = VectorStore()
+        
+        # In this standalone Gradio version, we use a temporary directory for the vector store
+        tmp_db_dir = os.path.join(tempfile.gettempdir(), f"chroma_{name}")
+        store = VectorStore(tmp_db_dir)
         store.add_chunks(chunks)
         NOTEBOOKS[name] = {"text": raw_text, "store": store}
         choices = list(NOTEBOOKS.keys())
