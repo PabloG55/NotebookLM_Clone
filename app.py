@@ -394,6 +394,121 @@ def get_study_guide_ui(notebook_name, profile: gr.OAuthProfile | None):
     finally:
         db.close()
 
+def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
+    empty_radios = [gr.update(visible=False, value=None) for _ in range(MAX_QUIZ_Q)]
+    default_outputs = [
+        "No notebook selected.",  # nb_info_md
+        None,                     # nb_files_view
+        [],                       # chatbot
+        "",                       # sum_out
+        "",                       # pod_script_out
+        None,                     # pod_lines_state
+        "",                       # quiz_display_md
+        "{}",                     # quiz_json_box
+        "",                       # study_out
+        None,                     # audio_out
+        ""                        # quiz_res_md
+    ] + empty_radios
+
+    if not nb_name or not profile:
+        return tuple(default_outputs)
+
+    db = get_db()
+    try:
+        notebook = db.query(Notebook).filter(Notebook.hf_user_id == profile.username, Notebook.title == nb_name).first()
+        if not notebook:
+            default_outputs[0] = "❌ Notebook not found."
+            return tuple(default_outputs)
+            
+        nb_id = notebook.notebook_id
+        
+        chroma_dir = get_chroma_db_dir(profile.username, nb_id)
+        store = VectorStore(chroma_dir)
+        count = store.collection.count()
+        info_md = f"📊 **{nb_name}** · {count} context chunks indexed."
+
+        docs = db.query(Document).filter(Document.notebook_id == nb_id).all()
+        nb_dir = get_notebook_subdir(profile.username, nb_id)
+        files = []
+        import os
+        for d in docs:
+            fpath = os.path.join(nb_dir, "raw", d.filename)
+            if os.path.exists(fpath):
+                files.append(fpath)
+        if not files:
+            files = None
+        
+        msgs = db.query(ChatMessage).filter(ChatMessage.notebook_id == nb_id).order_by(ChatMessage.created_at).all()
+        history = [{"role": m.role, "content": m.content} for m in msgs]
+        
+        artifacts = db.query(Artifact).filter(Artifact.notebook_id == nb_id).all()
+        art_dict = {a.artifact_type: a.content for a in artifacts}
+        
+        sum_val = art_dict.get("summary_brief", art_dict.get("summary_descriptive", ""))
+        
+        pod_key = next((k for k in art_dict.keys() if k.startswith("podcast_script_")), None)
+        pod_script_val = ""
+        pod_lines_val = None
+        if pod_key:
+            try:
+                pod_data = json.loads(art_dict[pod_key])
+                pod_script_val = pod_data.get("script", "")
+                pod_lines_val = pod_data.get("lines", [])
+            except:
+                pass
+                
+        quiz_key = next((k for k in art_dict.keys() if k.startswith("quiz_")), None)
+        quiz_val = []
+        if quiz_key:
+            try:
+                quiz_val = json.loads(art_dict[quiz_key])
+            except:
+                pass
+                
+        quiz_json_val = json.dumps(quiz_val) if quiz_val else "{}"
+        quiz_display = render_quiz_md(quiz_val) if quiz_val else ""
+        
+        quiz_radios = []
+        for i in range(MAX_QUIZ_Q):
+            if i < len(quiz_val):
+                q = quiz_val[i]
+                quiz_radios.append(gr.update(choices=[f"A: {q['options']['A']}", f"B: {q['options']['B']}", f"C: {q['options']['C']}", f"D: {q['options']['D']}"], value=None, visible=True))
+            else:
+                quiz_radios.append(gr.update(visible=False, value=None))
+
+        study_val = art_dict.get("study_guide", "")
+        
+        audio_out_val = None
+        audio_base64 = art_dict.get("podcast_audio")
+        if audio_base64:
+            import base64
+            import tempfile
+            try:
+                audio_bytes = base64.b64decode(audio_base64)
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+                tmp.write(audio_bytes)
+                tmp.close()
+                audio_out_val = tmp.name
+            except Exception as e:
+                print(f"Error loading audio: {e}")
+
+        return (
+            info_md,
+            files,
+            history,
+            sum_val,
+            pod_script_val,
+            pod_lines_val,
+            quiz_display,
+            quiz_json_val,
+            study_val,
+            audio_out_val,
+            "",
+            *quiz_radios
+        )
+    finally:
+        db.close()
+
 # ══════════════════════════════════════════════════════════════
 # UI DEFINITION
 # ══════════════════════════════════════════════════════════════
