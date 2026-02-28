@@ -452,6 +452,7 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
             pod_script_out = gr.Markdown()
             pod_lines_state = gr.State()
             audio_btn = gr.Button("🔊 Generate Audio")
+            audio_status = gr.Markdown()
             audio_out = gr.Audio(label="🎧 Listen")
             pod_btn.click(generate_podcast_ui, [active_nb, exchanges_sl], [pod_script_out, pod_lines_state])
             audio_btn.click(generate_audio_ui, [pod_lines_state, active_nb], [audio_out, audio_status])
