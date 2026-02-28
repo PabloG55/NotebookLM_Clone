@@ -228,15 +228,16 @@ def generate_study_guide(notebook_name, profile: gr.OAuthProfile | None):
     return res.json().get("result", f"❌ Error: {res.text}")
 
 def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
-    # Default empties for 10 UI components
-    if not nb_name or not profile:
-        return "No notebook selected.", None, [], "", "", None, "", "{}", "", None
+    # Default empties for 11 UI components + 10 quiz radios
+    empty_radios = [gr.update(visible=False, interactive=True) for _ in range(MAX_QUIZ_Q)]
+    if not profile or not nb_name:
+        return "No notebook selected.", None, [], "", "", None, "", "{}", "", None, "", *empty_radios
         
     res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
     nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == nb_name), None)
     
     if not nb_id:
-        return "❌ Notebook not found.", None, [], "", "", None, "", "{}", "", None
+        return "❌ Notebook not found.", None, [], "", "", None, "", "{}", "", None, "", *empty_radios
         
     # Fetch uploaded files
     res_files = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/files", headers=get_headers(profile))
@@ -257,12 +258,16 @@ def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
     
     quiz_json_val = json.dumps(quiz_val) if quiz_val else "{}"
     quiz_display = ""
+    quiz_results_clear = ""
+    radios = empty_radios.copy()
     if quiz_val:
-        for i, q in enumerate(quiz_val):
-            quiz_display += f"**Q{i+1}: {q.get('question', '')}**\n"
-            for j, opt in enumerate(q.get('options', [])):
-                 quiz_display += f"- {chr(65+j)}: {opt}\n"
-            quiz_display += "\n"
+        for i, q in enumerate(quiz_val[:MAX_QUIZ_Q]):
+            quiz_display += f"**Q{i+1}: {q.get('question', '')}**\n\n"
+            for k, v in q.get('options', {}).items():
+                 quiz_display += f"- **{k})** {v}\n"
+            quiz_display += "\n---\n"
+            radios[i] = gr.update(visible=True, choices=["A", "B", "C", "D"], label=f"Q{i+1}", value=None)
+            
             
     study_val = next((v for k, v in artifacts.items() if k.startswith("study_guide")), "")
     
@@ -282,7 +287,7 @@ def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
             print("Failed to decode cached audio", e)
             pass
     
-    return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val, audio_val
+    return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val, audio_val, quiz_results_clear, *radios
 
 # ==========================================
 # UI Build
@@ -457,7 +462,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     active_nb.change(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out]
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_results_md] + answer_radios
     )
 
     add_btn.click(
@@ -469,7 +474,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     ).then(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out]
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_results_md] + answer_radios
     )
 
     append_btn.click(
@@ -481,7 +486,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     ).then(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out]
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_results_md] + answer_radios
     )
 
     # Trigger load when page opens to fetch profile and notebooks
