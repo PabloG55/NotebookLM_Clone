@@ -73,8 +73,28 @@ def process_source(notebook_name, source_type, file_objs, url_text, profile: gr.
                 return f"✅ **{name}** added! {body.get('chunks', 0)} chunks processed.", fetch_notebooks_with_selection(profile, name)
             else:
                 return f"❌ Server Error: {res.text}", fetch_notebooks_with_selection(profile, name)
+        elif source_type == "URL":
+            if not url_text or not url_text.strip().startswith("http"):
+                return "❌ Please enter a valid URL (http/https).", gr.Dropdown()
+                
+            data = {"notebook_name": name, "url": url_text.strip()}
+            
+            # Resolve ID if this notebook exists
+            res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile))
+            if res_nbs.status_code == 200:
+                notebook_id = next((nb["id"] for nb in res_nbs.json() if nb["title"] == name), None)
+                if notebook_id:
+                    data["notebook_id"] = notebook_id
+            
+            res = requests.post(f"{API_BASE_URL}/api/upload/url", headers=get_headers(profile), data=data)
+            
+            if res.status_code == 200:
+                body = res.json()
+                return f"✅ **{name}** added! {body.get('chunks', 0)} chunks processed.", fetch_notebooks_with_selection(profile, name)
+            else:
+                return f"❌ Server Error: {res.text}", fetch_notebooks_with_selection(profile, name)
         else:
-            return "❌ URL ingest not implemented in API yet.", fetch_notebooks_with_selection(profile, name)
+            return "❌ Unsupported source type.", fetch_notebooks_with_selection(profile, name)
             
     except Exception as e:
         return f"❌ Error: {str(e)}", fetch_notebooks_with_selection(profile, name)
@@ -140,24 +160,33 @@ def clear_chat():
     return [], ""
 
 def generate_summary(notebook_name, mode, profile: gr.OAuthProfile | None):
-    if not profile or not notebook_name: return "❌ Log in and select a notebook."
-    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
-    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
-    if not nb_id: return "❌ Notebook not found."
-    
-    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "summary", "params": {"mode": mode}})
-    return res.json().get("result", f"❌ Error: {res.text}")
-
-def generate_podcast(notebook_name, exchanges, profile: gr.OAuthProfile | None):
     if not profile or not notebook_name: return "❌ Log in and select a notebook.", None
     res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
     nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
     if not nb_id: return "❌ Notebook not found.", None
     
+    res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "summary", "params": {"mode": mode}})
+    out_md = res.json().get("result", f"❌ Error: {res.text}")
+    
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w", encoding="utf-8") as f:
+        f.write(out_md)
+        return out_md, gr.update(value=f.name, visible=True)
+
+def generate_podcast(notebook_name, exchanges, profile: gr.OAuthProfile | None):
+    if not profile or not notebook_name: return "❌ Log in and select a notebook.", None, None
+    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+    if not nb_id: return "❌ Notebook not found.", None, None
+    
     res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "podcast_script", "params": {"num_exchanges": exchanges}})
-    if res.status_code != 200: return f"❌ Error: {res.text}", None
+    if res.status_code != 200: return f"❌ Error: {res.text}", None, None
     d = res.json()
-    return d.get("script", ""), d.get("parsed_lines", [])
+    script_md = d.get("script", "")
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w", encoding="utf-8") as f:
+        f.write(script_md)
+        return script_md, d.get("parsed_lines", []), gr.update(value=f.name, visible=True)
 
 def generate_audio(parsed_lines, notebook_name, profile: gr.OAuthProfile | None):
     if not parsed_lines: return None, "❌ No script generated yet."
@@ -182,13 +211,13 @@ def generate_audio(parsed_lines, notebook_name, profile: gr.OAuthProfile | None)
 MAX_QUIZ_Q = 10
 def gen_quiz(notebook_name, num_q, profile: gr.OAuthProfile | None):
     radios = [gr.update(visible=False, interactive=True) for _ in range(MAX_QUIZ_Q)]
-    if not profile or not notebook_name: return "❌ Log in/Select MB", "{}", "", "" , *radios
+    if not profile or not notebook_name: return "❌ Log in/Select MB", "{}", "", "", None , *radios
     res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
     nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
-    if not nb_id: return "❌ Notebook not found", "{}", "", "", *radios
+    if not nb_id: return "❌ Notebook not found", "{}", "", "", None, *radios
     
     res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "quiz", "params": {"num_questions": num_q}})
-    if res.status_code != 200: return f"❌ Error: {res.text}", "{}", "", "", *radios
+    if res.status_code != 200: return f"❌ Error: {res.text}", "{}", "", "", None, *radios
     
     quiz_data = res.json().get("quiz", [])
     md = ""
@@ -199,7 +228,10 @@ def gen_quiz(notebook_name, num_q, profile: gr.OAuthProfile | None):
         md += "\n---\n"
         radios[i] = gr.update(visible=True, choices=["A", "B", "C", "D"], label=f"Q{i+1}")
         
-    return "✅ Quiz Ready!", json.dumps(quiz_data), md, "", *radios
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w", encoding="utf-8") as f:
+        f.write(md)
+        return "✅ Quiz Ready!", json.dumps(quiz_data), md, "", gr.update(value=f.name, visible=True), *radios
 
 def submit_quiz(quiz_json, *answers):
     quiz_data = json.loads(quiz_json)
@@ -231,13 +263,13 @@ def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
     # Default empties for 11 UI components + 10 quiz radios
     empty_radios = [gr.update(visible=False, interactive=True) for _ in range(MAX_QUIZ_Q)]
     if not profile or not nb_name:
-        return "No notebook selected.", None, [], "", "", None, "", "{}", "", None, "", *empty_radios
+        return "No notebook selected.", None, [], "", gr.update(visible=False), "", None, gr.update(visible=False), "", "{}", "", gr.update(visible=False), None, "", *empty_radios
         
     res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
     nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == nb_name), None)
     
     if not nb_id:
-        return "❌ Notebook not found.", None, [], "", "", None, "", "{}", "", None, "", *empty_radios
+        return "❌ Notebook not found.", None, [], "", gr.update(visible=False), "", None, gr.update(visible=False), "", "{}", "", gr.update(visible=False), None, "", *empty_radios
         
     # Fetch uploaded files
     res_files = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/files", headers=get_headers(profile))
@@ -287,7 +319,28 @@ def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
             print("Failed to decode cached audio", e)
             pass
     
-    return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val, audio_val, quiz_results_clear, *radios
+    # Save files to temp for downloading
+    import tempfile
+    
+    sum_btn_update = gr.update(visible=False)
+    if sum_val:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w", encoding="utf-8") as f:
+            f.write(sum_val)
+            sum_btn_update = gr.update(value=f.name, visible=True)
+            
+    pod_btn_update = gr.update(visible=False)
+    if pod_script_val:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w", encoding="utf-8") as f:
+            f.write(pod_script_val)
+            pod_btn_update = gr.update(value=f.name, visible=True)
+            
+    quiz_btn_update = gr.update(visible=False)
+    if quiz_display:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w", encoding="utf-8") as f:
+            f.write(quiz_display)
+            quiz_btn_update = gr.update(value=f.name, visible=True)
+    
+    return f"Selected: **{nb_name}**", files, chats, sum_val, sum_btn_update, pod_script_val, pod_lines_val, pod_btn_update, quiz_display, quiz_json_val, study_val, quiz_btn_update, audio_val, quiz_results_clear, *radios
 
 # ==========================================
 # UI Build
@@ -309,6 +362,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             with gr.Row():
                 rename_in = gr.Textbox(placeholder="New name...", show_label=False, scale=3)
                 rename_btn = gr.Button("✏️ Rename", size="sm", scale=1)
+                delete_btn = gr.Button("🗑️ Delete", size="sm", scale=1, variant="stop")
 
     # Function moved to end of blocks to reference file_in and chatbot
 
@@ -328,6 +382,24 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
         return gr.update(), gr.update(), f"❌ Error: {res.text}"
 
     rename_btn.click(rename_notebook_ui, inputs=[active_nb, rename_in], outputs=[active_nb, rename_in, nb_info_md])
+
+    def delete_notebook_ui(notebook_name, profile: gr.OAuthProfile | None):
+        if not profile or not notebook_name: 
+            return gr.update(), "❌ Invalid operation."
+        res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+        nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+        if not nb_id: 
+            return gr.update(), "❌ Notebook not found."
+            
+        res = requests.delete(f"{API_BASE_URL}/api/notebooks/{nb_id}", headers=get_headers(profile))
+        if res.status_code == 200:
+            new_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+            titles = [n["title"] for n in new_nbs]
+            new_val = titles[0] if titles else None
+            return gr.update(choices=titles, value=new_val), f"✅ Deleted **{notebook_name}**"
+        return gr.update(), f"❌ Error: {res.text}"
+
+    delete_btn.click(delete_notebook_ui, inputs=[active_nb], outputs=[active_nb, nb_info_md])
 
     gr.Markdown("---")
 
@@ -379,18 +451,19 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             send_btn.click(chat_response, inputs=[chat_in, chatbot, active_nb], outputs=[chatbot, chat_in])
             clr_btn.click(clear_chat, inputs=None, outputs=[chatbot, chat_in])
 
-        # ── TAB 3: SUMMARY ───────────────────────────────────────────────────
-        with gr.TabItem("📝 Summary"):
-            gr.Markdown("### Generate a document summary")
+        # ── TAB 3: REPORT ───────────────────────────────────────────────────
+        with gr.TabItem("📝 Report"):
+            gr.Markdown("### Generate a document report / summary")
             with gr.Row():
                 sum_mode = gr.Radio(
                     ["Brief", "Descriptive"], value="Brief", label="Style",
                     info="Brief = 4-6 sentences · Descriptive = full structured breakdown",
                 )
                 sum_btn = gr.Button("✨ Generate", variant="primary")
+                sum_download = gr.DownloadButton("📥 Download Report", visible=False)
             sum_out = gr.Markdown()
-            def load_sum(): return "⏳ Generating Summary..."
-            sum_btn.click(load_sum, None, sum_out).then(generate_summary, inputs=[active_nb, sum_mode], outputs=sum_out)
+            def load_sum(): return "⏳ Generating Report...", gr.update(visible=False)
+            sum_btn.click(load_sum, None, [sum_out, sum_download]).then(generate_summary, inputs=[active_nb, sum_mode], outputs=[sum_out, sum_download])
 
         # ── TAB 4: PODCAST ───────────────────────────────────────────────────
         with gr.TabItem("🎙️ Podcast"):
@@ -401,6 +474,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             with gr.Row():
                 exchanges_sl = gr.Slider(8, 20, value=12, step=1, label="Exchanges")
                 pod_btn = gr.Button("🎙️ Generate Script", variant="primary")
+                pod_download = gr.DownloadButton("📥 Download Script", visible=False)
 
             pod_script_out = gr.Markdown()
             pod_lines_state = gr.State(None)
@@ -410,8 +484,8 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                 audio_status = gr.Markdown()
             audio_out = gr.Audio(label="🎧 Listen", type="filepath")
 
-            def load_pod(): return "⏳ Generating Script...", None
-            pod_btn.click(load_pod, None, [pod_script_out, pod_lines_state]).then(generate_podcast, inputs=[active_nb, exchanges_sl], outputs=[pod_script_out, pod_lines_state])
+            def load_pod(): return "⏳ Generating Script...", None, gr.update(visible=False)
+            pod_btn.click(load_pod, None, [pod_script_out, pod_lines_state, pod_download]).then(generate_podcast, inputs=[active_nb, exchanges_sl], outputs=[pod_script_out, pod_lines_state, pod_download])
             
             def load_audio(): return None, "⏳ Synthesizing Audio..."
             audio_btn.click(load_audio, None, [audio_out, audio_status]).then(generate_audio, inputs=[pod_lines_state, active_nb], outputs=[audio_out, audio_status])
@@ -422,6 +496,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             with gr.Row():
                 num_q_sl = gr.Slider(3, MAX_QUIZ_Q, value=5, step=1, label="Questions")
                 quiz_gen_btn = gr.Button("🎲 Generate Quiz", variant="primary")
+                quiz_download = gr.DownloadButton("📥 Download Quiz", visible=False)
 
             quiz_status_md = gr.Markdown()
             quiz_display_md = gr.Markdown()
@@ -435,13 +510,13 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             submit_btn = gr.Button("✅ Submit Answers", variant="primary")
             quiz_results_md = gr.Markdown()
 
-            def load_quiz(): return "⏳ Generating Quiz...", "{}", "", ""
+            def load_quiz(): return "⏳ Generating Quiz...", "{}", "", "", gr.update(visible=False)
             quiz_gen_btn.click(
-                load_quiz, None, [quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md]
+                load_quiz, None, [quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md, quiz_download]
             ).then(
                 gen_quiz,
                 inputs=[active_nb, num_q_sl],
-                outputs=[quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md] + answer_radios,
+                outputs=[quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md, quiz_download] + answer_radios,
             )
             submit_btn.click(
                 submit_quiz,
@@ -462,7 +537,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     active_nb.change(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_results_md] + answer_radios
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, sum_download, pod_script_out, pod_lines_state, pod_download, quiz_display_md, quiz_json_box, study_out, quiz_download, audio_out, quiz_results_md] + answer_radios
     )
 
     add_btn.click(
@@ -474,7 +549,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     ).then(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_results_md] + answer_radios
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, sum_download, pod_script_out, pod_lines_state, pod_download, quiz_display_md, quiz_json_box, study_out, quiz_download, audio_out, quiz_results_md] + answer_radios
     )
 
     append_btn.click(
@@ -486,7 +561,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     ).then(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_results_md] + answer_radios
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, sum_download, pod_script_out, pod_lines_state, pod_download, quiz_display_md, quiz_json_box, study_out, quiz_download, audio_out, quiz_results_md] + answer_radios
     )
 
     # Trigger load when page opens to fetch profile and notebooks

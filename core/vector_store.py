@@ -18,7 +18,7 @@ class VectorStore:
             metadata={"hnsw:space": "l2"} # L2 distance to match the old FAISS behavior
         )
 
-    def add_chunks(self, chunks: List[str]):
+    def add_chunks(self, chunks: List[str], source_filename: str = "Unknown Source"):
         if not chunks:
             return
 
@@ -28,14 +28,22 @@ class VectorStore:
         # Generate unique IDs for chroma insertion
         ids = [str(uuid.uuid4()) for _ in chunks]
         
+        # Provide metadata tracking the original file name so we can cite its chunks
+        metadatas = [{"source": source_filename} for _ in chunks]
+        
         # Add to the chroma collection
         self.collection.add(
             documents=chunks,
             embeddings=embeddings,
+            metadatas=metadatas,
             ids=ids
         )
 
-    def search(self, query: str, top_k: int = 5) -> List[str]:
+    def search(self, query: str, top_k: int = 5, include_metadata: bool = False):
+        """
+        Returns a list of chunks if include_metadata is False
+        If include_metadata is True, returns a list of dicts: [{"text": <chunk>, "metadata": <meta>}]
+        """
         if self.collection.count() == 0:
             return []
             
@@ -45,13 +53,20 @@ class VectorStore:
         # Query chroma
         results = self.collection.query(
             query_embeddings=[q_emb],
-            n_results=top_k
+            n_results=top_k,
+            include=["documents", "metadatas"] if include_metadata else ["documents"]
         )
         
-        # Chroma returns a list of lists for documents, we just need the first set
-        if results and results["documents"] and results["documents"][0]:
-            return results["documents"][0]
-        return []
+        if not results or not results.get("documents") or not results["documents"][0]:
+            return []
+            
+        docs = results["documents"][0]
+        
+        if include_metadata and results.get("metadatas") and results["metadatas"][0]:
+            metas = results["metadatas"][0]
+            return [{"text": docs[i], "source": metas[i].get("source", "Unknown")} for i in range(len(docs))]
+            
+        return docs
 
     def is_ready(self) -> bool:
         return self.collection.count() > 0

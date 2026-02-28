@@ -109,7 +109,7 @@ async def upload_document(
     # 3. Store Vectors in specific Chromadb folder
     chroma_dir = get_chroma_db_dir(hf_user_id, notebook.notebook_id)
     vstore = VectorStore(chroma_dir)
-    vstore.add_chunks(chunks)
+    vstore.add_chunks(chunks, source_filename=file.filename)
 
     # 4. Save metadata to DB
     doc = Document(
@@ -124,6 +124,75 @@ async def upload_document(
 
     # 5. Persist original file (optional, follows architecture tree)
     save_raw_file(hf_user_id, notebook.notebook_id, file.filename, raw_bytes)
+
+    return {"status": "success", "notebook_id": notebook.notebook_id, "chunks": len(chunks)}
+
+
+@app.post("/api/upload/url")
+async def upload_url(
+    notebook_name: str = Form(None),
+    notebook_id: str = Form(None),
+    url: str = Form(...),
+    hf_user_id: str = Depends(verify_hf_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Handles URL ingest.
+    1. Check if notebook exists or make new one
+    2. Extract text from URL
+    3. Chunk and vectorize into ChromaDB
+    4. Save Database metadata
+    """
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid URL format.")
+
+    # 1. Find or create notebook
+    notebook = None
+    if notebook_id:
+        notebook = db.query(Notebook).filter(Notebook.notebook_id == notebook_id, Notebook.hf_user_id == hf_user_id).first()
+        if not notebook:
+            raise HTTPException(status_code=404, detail="Notebook ID provided but not found.")
+    elif notebook_name:
+        notebook = db.query(Notebook).filter(Notebook.hf_user_id == hf_user_id, Notebook.title == notebook_name).first()
+        if not notebook:
+            notebook = Notebook(notebook_id=str(uuid.uuid4()), hf_user_id=hf_user_id, title=notebook_name)
+            db.add(notebook)
+            db.commit()
+    else:
+        raise HTTPException(status_code=400, detail="Must provide either notebook_name or notebook_id")
+
+    # 2. Extract Raw Text & Vectorize
+    try:
+        raw_text = ingest_source("url", url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch or parse URL: {e}")
+        
+    if not raw_text or len(raw_text.strip()) < 50:
+         raise HTTPException(status_code=400, detail="Could not extract enough text from URL.")
+
+    chunks = chunk_text(raw_text)
+    
+    # 3. Store Vectors in specific Chromadb folder
+    chroma_dir = get_chroma_db_dir(hf_user_id, notebook.notebook_id)
+    vstore = VectorStore(chroma_dir)
+    vstore.add_chunks(chunks, source_filename=url)
+
+    # 4. Save metadata to DB
+    doc = Document(
+        doc_id=str(uuid.uuid4()),
+        notebook_id=notebook.notebook_id,
+        filename=url,
+        file_type="url",
+        chunk_count=len(chunks)
+    )
+    db.add(doc)
+    db.commit()
+
+    # 5. Save a placeholder so it shows up in "Files Currently in Notebook"
+    # Convert things like https://www.speedtest.net/ to a safe filename
+    import urllib.parse
+    safe_name = urllib.parse.quote_plus(url)[:50] + ".url.txt"
+    save_raw_file(hf_user_id, notebook.notebook_id, safe_name, url.encode('utf-8'))
 
     return {"status": "success", "notebook_id": notebook.notebook_id, "chunks": len(chunks)}
 
@@ -180,6 +249,22 @@ def rename_notebook(request: RenameRequest, hf_user_id: str = Depends(verify_hf_
     notebook.title = request.new_title
     db.commit()
     return {"status": "success", "new_title": notebook.title}
+
+@app.delete("/api/notebooks/{notebook_id}")
+def delete_notebook(notebook_id: str, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
+    """Deletes an existing notebook, including all its database objects and persistent files"""
+    notebook = db.query(Notebook).filter(Notebook.notebook_id == notebook_id, Notebook.hf_user_id == hf_user_id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found or unauthorized")
+        
+    # Delete from database (cascade handles related objects)
+    db.delete(notebook)
+    db.commit()
+    
+    # Delete from filesystem (ChromaDB, raw files, extractions)
+    delete_notebook_storage(hf_user_id, notebook_id)
+    
+    return {"status": "success", "message": "Notebook deleted"}
 
 class GenerateRequest(BaseModel):
     notebook_id: str

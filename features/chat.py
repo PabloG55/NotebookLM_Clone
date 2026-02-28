@@ -25,9 +25,18 @@ def build_rag_messages(
     history: List[dict],
     top_k: int = 6,
 ) -> List[dict]:
-    # Retrieve relevant chunks
-    relevant_chunks = vector_store.search(query, top_k=top_k)
-    context = "\n\n---\n\n".join(relevant_chunks) if relevant_chunks else "No relevant context found."
+    # Retrieve relevant chunks with metadata
+    results = vector_store.search(query, top_k=top_k, include_metadata=True)
+    
+    context_blocks = []
+    if results:
+        # results is a list of dicts: [{"text": chunk, "source": filename}, ...]
+        for i, res in enumerate(results):
+            text = res.get("text", "")
+            source = res.get("source", "Unknown")
+            context_blocks.append(f"[Source {i+1}: {source}]\n{text}")
+            
+    context = "\n\n---\n\n".join(context_blocks) if context_blocks else "No relevant context found."
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
