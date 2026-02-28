@@ -119,6 +119,20 @@ def chat(request: ChatRequest, hf_user_id: str = Depends(verify_hf_user), db: Se
 
     return {"response": full_response}
 
+class RenameRequest(BaseModel):
+    notebook_id: str
+    new_title: str
+
+@app.post("/api/notebooks/rename")
+def rename_notebook(request: RenameRequest, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
+    """Renames an existing notebook"""
+    notebook = db.query(Notebook).filter(Notebook.notebook_id == request.notebook_id, Notebook.hf_user_id == hf_user_id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found or unauthorized")
+        
+    notebook.title = request.new_title
+    db.commit()
+    return {"status": "success", "new_title": notebook.title}
 
 class GenerateRequest(BaseModel):
     notebook_id: str

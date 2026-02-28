@@ -224,12 +224,33 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     # Global notebook selector bar
     with gr.Row():
         active_nb = gr.Dropdown(choices=[], label="📚 Active Notebook", interactive=True, scale=4)
-        nb_info_md = gr.Markdown("_Login and select a notebook_")
+        with gr.Column(scale=2):
+            nb_info_md = gr.Markdown("_Login and select a notebook_")
+            with gr.Row():
+                rename_in = gr.Textbox(placeholder="New name...", show_label=False, scale=3)
+                rename_btn = gr.Button("✏️ Rename", size="sm", scale=1)
 
     def get_notebook_info(nb_name):
         return f"Selected: **{nb_name}**" if nb_name else "No notebook selected."
         
     active_nb.change(get_notebook_info, inputs=active_nb, outputs=nb_info_md)
+
+    def rename_notebook_ui(notebook_name, new_name, profile: gr.OAuthProfile | None):
+        if not profile or not notebook_name or not new_name.strip(): 
+            return gr.update(), gr.update(), "❌ Invalid operation."
+        res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+        nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == notebook_name), None)
+        if not nb_id: 
+            return gr.update(), gr.update(), "❌ Notebook not found."
+        
+        res = requests.post(f"{API_BASE_URL}/api/notebooks/rename", headers=get_headers(profile), json={"notebook_id": nb_id, "new_title": new_name.strip()})
+        if res.status_code == 200:
+            new_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+            titles = [n["title"] for n in new_nbs]
+            return gr.update(choices=titles, value=new_name.strip()), gr.update(value=""), f"✅ Renamed to **{new_name.strip()}**"
+        return gr.update(), gr.update(), f"❌ Error: {res.text}"
+
+    rename_btn.click(rename_notebook_ui, inputs=[active_nb, rename_in], outputs=[active_nb, rename_in, nb_info_md])
 
     gr.Markdown("---")
 
@@ -278,7 +299,8 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                 )
                 sum_btn = gr.Button("✨ Generate", variant="primary")
             sum_out = gr.Markdown()
-            sum_btn.click(generate_summary, inputs=[active_nb, sum_mode], outputs=sum_out)
+            def load_sum(): return "⏳ Generating Summary..."
+            sum_btn.click(load_sum, None, sum_out).then(generate_summary, inputs=[active_nb, sum_mode], outputs=sum_out)
 
         # ── TAB 4: PODCAST ───────────────────────────────────────────────────
         with gr.TabItem("🎙️ Podcast"):
@@ -298,8 +320,11 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                 audio_status = gr.Markdown()
             audio_out = gr.Audio(label="🎧 Listen", type="filepath")
 
-            pod_btn.click(generate_podcast, inputs=[active_nb, exchanges_sl], outputs=[pod_script_out, pod_lines_state])
-            audio_btn.click(generate_audio, inputs=pod_lines_state, outputs=[audio_out, audio_status])
+            def load_pod(): return "⏳ Generating Script...", None
+            pod_btn.click(load_pod, None, [pod_script_out, pod_lines_state]).then(generate_podcast, inputs=[active_nb, exchanges_sl], outputs=[pod_script_out, pod_lines_state])
+            
+            def load_audio(): return None, "⏳ Synthesizing Audio..."
+            audio_btn.click(load_audio, None, [audio_out, audio_status]).then(generate_audio, inputs=pod_lines_state, outputs=[audio_out, audio_status])
 
         # ── TAB 5: QUIZ ──────────────────────────────────────────────────────
         with gr.TabItem("🧪 Quiz"):
@@ -320,7 +345,10 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             submit_btn = gr.Button("✅ Submit Answers", variant="primary")
             quiz_results_md = gr.Markdown()
 
+            def load_quiz(): return "⏳ Generating Quiz...", "{}", "", ""
             quiz_gen_btn.click(
+                load_quiz, None, [quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md]
+            ).then(
                 gen_quiz,
                 inputs=[active_nb, num_q_sl],
                 outputs=[quiz_status_md, quiz_json_box, quiz_display_md, quiz_results_md] + answer_radios,
@@ -336,7 +364,8 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             gr.Markdown("### Key concepts, definitions, flashcards & summary")
             study_btn = gr.Button("📚 Generate Study Guide", variant="primary")
             study_out = gr.Markdown()
-            study_btn.click(generate_study_guide, inputs=[active_nb], outputs=study_out)
+            def load_study(): return "⏳ Generating Study Guide..."
+            study_btn.click(load_study, None, study_out).then(generate_study_guide, inputs=[active_nb], outputs=study_out)
 
     # Trigger load when page opens to fetch profile and notebooks
     demo.load(fetch_notebooks, inputs=None, outputs=active_nb)
