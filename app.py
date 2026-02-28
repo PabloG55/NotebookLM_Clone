@@ -626,9 +626,9 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
 
     
     # === WIRING HOISTS ===
-    def _do_append(nb, st, fi, url, p): return process_source(nb, st, fi, url, True, p)
-    append_btn.click(_do_append, [active_nb, src_type2, file_in2, url_in2], [append_status, active_nb])
-
+    def _do_append(nb, st, fi, url, profile: gr.OAuthProfile | None): return process_source(nb, st, fi, url, True, profile)
+    def _do_add(nb, st, fi, url, profile: gr.OAuthProfile | None): return process_source(nb, st, fi, url, False, profile)
+    
     # Refresh notebook data logic
     active_nb.change(
         load_notebook_data, 
@@ -636,11 +636,16 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
         outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_res_md] + ans_radios
     )
 
-    # After add/append, clear inputs and reload notebook
-    add_btn.click(clear_file, None, file_in1).then(
+    # Note: add_btn action requires the `notebook_name` input
+    add_btn.click(_do_add, [nb_name, src_type1, file_in1, url_in1], [add_status, active_nb]).then(
+        clear_file, None, file_in1
+    ).then(
         load_notebook_data, inputs=[active_nb], outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_res_md] + ans_radios
     )
-    append_btn.click(clear_file, None, file_in2).then(
+    
+    append_btn.click(_do_append, [active_nb, src_type2, file_in2, url_in2], [append_status, active_nb]).then(
+        clear_file, None, file_in2
+    ).then(
         load_notebook_data, inputs=[active_nb], outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_res_md] + ans_radios
     )
 
