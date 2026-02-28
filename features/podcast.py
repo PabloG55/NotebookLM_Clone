@@ -3,20 +3,25 @@ Generates a 2-person podcast script from document content.
 Alex (female voice) = curious host
 Dr. Sam (male voice) = expert guest
 
-Audio uses edge-tts for two distinct, natural Microsoft neural voices.
+Audio uses Hugging Face TTS (facebook/mms-tts-eng).
 Each speaker line is rendered separately and stitched together with pydub.
 """
+
 import re
 from core.groq_client import groq_chat
 import io
 import asyncio
 import tempfile
 import os
+import torch
+import soundfile as sf
+from transformers import VitsModel, AutoTokenizer
 
 
-# Microsoft Neural Voice assignments
-VOICE_ALEX = "en-US-JennyNeural"   # Warm, friendly female — host
-VOICE_SAM  = "en-US-GuyNeural"     # Clear, authoritative male — expert
+# Load HF TTS model once (global)
+TTS_MODEL_NAME = "facebook/mms-tts-eng"
+tts_tokenizer = AutoTokenizer.from_pretrained(TTS_MODEL_NAME)
+tts_model = VitsModel.from_pretrained(TTS_MODEL_NAME)
 
 
 def generate_podcast_script(text: str, num_exchanges: int = 12) -> str:
@@ -63,52 +68,56 @@ RULES:
     ]
     return groq_chat(messages, temperature=0.88, max_tokens=4096)
 
+
 def parse_podcast_script(script: str) -> list:
     lines = []
     for line in script.strip().splitlines():
         line = line.strip()
         if not line:
             continue
-        # Handle "Dr. Sam:" and variations like "Dr Sam:" or "Sam:"
+
         if re.match(r'^dr\.?\s*sam\s*:', line, re.IGNORECASE):
             content = re.sub(r'^dr\.?\s*sam\s*:\s*', '', line, flags=re.IGNORECASE).strip()
             if content:
                 lines.append(("Dr. Sam", content))
-        # Handle "Alex:" and variations
+
         elif re.match(r'^alex\s*:', line, re.IGNORECASE):
             content = re.sub(r'^alex\s*:\s*', '', line, flags=re.IGNORECASE).strip()
             if content:
                 lines.append(("Alex", content))
-    return lines
-    
 
-async def _synthesize_line(text: str, voice: str, output_path: str):
-    """Async: synthesize one line of dialogue to an MP3 file using edge-tts."""
-    import edge_tts
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(output_path)
+    return lines
+
+
+def _synthesize_line_local(text: str, output_path: str):
+    """Generate TTS audio locally using Hugging Face VITS model."""
+    inputs = tts_tokenizer(text, return_tensors="pt")
+
+    with torch.no_grad():
+        output = tts_model(**inputs).waveform
+
+    waveform = output.squeeze().cpu().numpy()
+
+    # Save WAV temporarily
+    sf.write(output_path, waveform, 16000)
 
 
 async def _build_audio_async(script_lines: list) -> bytes:
-    """
-    Render each line with the correct speaker voice, stitch into one MP3.
-    Speaker changes get a longer pause for natural conversation feel.
-    """
     from pydub import AudioSegment
 
     combined = AudioSegment.empty()
-    pause_same   = AudioSegment.silent(duration=350)  # 0.35s same speaker
-    pause_switch = AudioSegment.silent(duration=650)  # 0.65s speaker change
+    pause_same   = AudioSegment.silent(duration=350)
+    pause_switch = AudioSegment.silent(duration=650)
 
     prev_speaker = None
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for i, (speaker, line) in enumerate(script_lines):
-            voice = VOICE_ALEX if speaker == "Alex" else VOICE_SAM
-            out_path = os.path.join(tmpdir, f"line_{i}.mp3")
+            out_path = os.path.join(tmpdir, f"line_{i}.wav")
 
-            await _synthesize_line(line, voice, out_path)
-            segment = AudioSegment.from_mp3(out_path)
+            _synthesize_line_local(line, out_path)
+
+            segment = AudioSegment.from_wav(out_path)
 
             if prev_speaker is not None:
                 combined += pause_switch if prev_speaker != speaker else pause_same
@@ -125,7 +134,5 @@ async def _build_audio_async(script_lines: list) -> bytes:
 async def generate_podcast_audio(script_lines: list) -> bytes:
     """
     Public entry point: converts parsed script into a dual-voice stitched MP3.
-    Alex = JennyNeural (female), Dr. Sam = GuyNeural (male).
-    Returns MP3 bytes.
     """
     return await _build_audio_async(script_lines)

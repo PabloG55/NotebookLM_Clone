@@ -20,4 +20,6 @@ uvicorn
 python-multipart
 tiktoken
 imageio-ffmpeg==0.5.1
-edge-tts==6.1.9groq
+edge-tts==6.1.9
+soundfile
+librosa
