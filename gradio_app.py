@@ -15,7 +15,7 @@ def get_headers(profile: gr.OAuthProfile | None) -> dict:
         return {}
     return {"X-HF-User": profile.username}
 
-def fetch_notebooks(profile: gr.OAuthProfile | None):
+def fetch_notebooks_with_selection(profile: gr.OAuthProfile | None, selected_title: str | None = None):
     if not profile:
         return gr.Dropdown(choices=[], value=None)
     try:
@@ -23,11 +23,14 @@ def fetch_notebooks(profile: gr.OAuthProfile | None):
         if res.status_code == 200:
             notebooks = res.json()
             choices = [nb["title"] for nb in notebooks]
-            # In a full impl we map names to IDs, but for Simplicity keeping titles here
-            return gr.Dropdown(choices=choices, value=choices[0] if choices else None)
+            target_val = selected_title if selected_title in choices else (choices[0] if choices else None)
+            return gr.Dropdown(choices=choices, value=target_val)
     except Exception as e:
         print(f"Error fetching notebooks: {e}")
     return gr.Dropdown(choices=[], value=None)
+
+def fetch_notebooks(profile: gr.OAuthProfile | None):
+    return fetch_notebooks_with_selection(profile)
 
 
 def process_source(notebook_name, source_type, file_objs, url_text, profile: gr.OAuthProfile | None):
@@ -60,14 +63,14 @@ def process_source(notebook_name, source_type, file_objs, url_text, profile: gr.
                 
             if res.status_code == 200:
                 body = res.json()
-                return f"✅ **{name}** added! {body.get('chunks', 0)} chunks processed.", fetch_notebooks(profile)
+                return f"✅ **{name}** added! {body.get('chunks', 0)} chunks processed.", fetch_notebooks_with_selection(profile, name)
             else:
-                return f"❌ Server Error: {res.text}", fetch_notebooks(profile)
+                return f"❌ Server Error: {res.text}", fetch_notebooks_with_selection(profile, name)
         else:
-            return "❌ URL ingest not implemented in API yet.", fetch_notebooks(profile)
+            return "❌ URL ingest not implemented in API yet.", fetch_notebooks_with_selection(profile, name)
             
     except Exception as e:
-        return f"❌ Error: {str(e)}", fetch_notebooks(profile)
+        return f"❌ Error: {str(e)}", fetch_notebooks_with_selection(profile, name)
 
 
 def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | None):
@@ -254,24 +257,37 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
     with gr.Tabs():
         # ── TAB 1: NOTEBOOKS ─────────────────────────────────────────────────
         with gr.TabItem("📁 Notebooks"):
-            gr.Markdown("### ➕ Add New Notebook")
             with gr.Row():
-                with gr.Column():
+                with gr.Column(variant="panel"):
+                    gr.Markdown("### ➕ Create New Notebook")
                     nb_name = gr.Textbox(label="Notebook Name", placeholder="e.g. Biology Notes")
-                    src_type = gr.Radio(["PDF", "PPTX", "TXT", "URL"], label="Source Type", value="PDF")
-                    file_in = gr.File(label="Upload Files", file_types=[".pdf",".pptx",".ppt",".txt",".md"], file_count="multiple")
-                    url_in = gr.Textbox(label="URL", placeholder="https://...", visible=False)
+                    src_type1 = gr.Radio(["PDF", "PPTX", "TXT", "URL"], label="Source Type", value="PDF")
+                    file_in1 = gr.File(label="Upload Files", file_types=[".pdf",".pptx",".ppt",".txt",".md"], file_count="multiple")
+                    url_in1 = gr.Textbox(label="URL", placeholder="https://...", visible=False)
 
                     def toggle(t):
                         return gr.File(visible=t != "URL", file_count="multiple"), gr.Textbox(visible=t == "URL")
-                    src_type.change(toggle, inputs=src_type, outputs=[file_in, url_in])
+                    src_type1.change(toggle, inputs=src_type1, outputs=[file_in1, url_in1])
 
-                    add_btn = gr.Button("🚀 Process & Add", variant="primary")
-
-                with gr.Column():
+                    add_btn = gr.Button("🚀 Create Notebook", variant="primary")
                     add_status = gr.Markdown("_Upload a source to begin._")
+                    add_btn.click(process_source, inputs=[nb_name, src_type1, file_in1, url_in1], outputs=[add_status, active_nb])
 
-            add_btn.click(process_source, inputs=[nb_name, src_type, file_in, url_in], outputs=[add_status, active_nb])
+                with gr.Column(variant="panel"):
+                    gr.Markdown("### 📎 Append to Active Notebook")
+                    gr.Markdown("_Adds sources to the notebook currently selected in the top bar._")
+                    src_type2 = gr.Radio(["PDF", "PPTX", "TXT", "URL"], label="Source Type", value="PDF")
+                    file_in2 = gr.File(label="Upload Files", file_types=[".pdf",".pptx",".ppt",".txt",".md"], file_count="multiple")
+                    url_in2 = gr.Textbox(label="URL", placeholder="https://...", visible=False)
+                    
+                    src_type2.change(toggle, inputs=src_type2, outputs=[file_in2, url_in2])
+
+                    append_btn = gr.Button("📎 Process & Append", variant="primary")
+                    append_status = gr.Markdown()
+                    append_btn.click(process_source, inputs=[active_nb, src_type2, file_in2, url_in2], outputs=[append_status, active_nb])
+            
+            with gr.Row():
+                nb_files_view = gr.File(label="Files Currently in Notebook (Read-Only)", interactive=False)
 
         # ── TAB 2: CHAT ──────────────────────────────────────────────────────
         with gr.TabItem("💬 Chat"):
@@ -365,14 +381,15 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             study_btn.click(load_study, None, study_out).then(generate_study_guide, inputs=[active_nb], outputs=study_out)
 
     def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
+        # Default empties for 9 UI components
         if not nb_name or not profile:
-            return "No notebook selected.", None, []
+            return "No notebook selected.", None, [], "", "", None, "", "{}", ""
             
         res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
         nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == nb_name), None)
         
         if not nb_id:
-            return "❌ Notebook not found.", None, []
+            return "❌ Notebook not found.", None, [], "", "", None, "", "{}", ""
             
         # Fetch uploaded files
         res_files = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/files", headers=get_headers(profile))
@@ -382,12 +399,32 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
         res_chats = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/chats", headers=get_headers(profile))
         chats = res_chats.json() if res_chats.status_code == 200 else []
         
-        return f"Selected: **{nb_name}**", files, chats
+        # Fetch generated artifacts
+        res_artifacts = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/artifacts", headers=get_headers(profile))
+        artifacts = res_artifacts.json() if res_artifacts.status_code == 200 else {}
+        
+        sum_val = next((v for k, v in artifacts.items() if k.startswith("summary")), "")
+        pod_script_val = next((json.loads(v).get("script", "") for k, v in artifacts.items() if k.startswith("podcast_script")), "")
+        pod_lines_val = next((json.loads(v).get("parsed_lines", []) for k, v in artifacts.items() if k.startswith("podcast_script")), None)
+        quiz_val = next((json.loads(v).get("quiz", []) for k, v in artifacts.items() if k.startswith("quiz")), [])
+        
+        quiz_json_val = json.dumps(quiz_val) if quiz_val else "{}"
+        quiz_display = ""
+        if quiz_val:
+            for i, q in enumerate(quiz_val):
+                quiz_display += f"**Q{i+1}: {q.get('question', '')}**\n"
+                for j, opt in enumerate(q.get('options', [])):
+                     quiz_display += f"- {chr(65+j)}: {opt}\n"
+                quiz_display += "\n"
+                
+        study_val = next((v for k, v in artifacts.items() if k.startswith("study_guide")), "")
+        
+        return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val
 
     active_nb.change(
         load_notebook_data, 
         inputs=[active_nb], 
-        outputs=[nb_info_md, file_in, chatbot]
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
     )
 
     # Trigger load when page opens to fetch profile and notebooks

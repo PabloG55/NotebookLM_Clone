@@ -52,6 +52,17 @@ def get_notebook_chats(notebook_id: str, hf_user_id: str = Depends(verify_hf_use
     history = [{"role": msg.role, "content": msg.content} for msg in history_records]
     return history
 
+@app.get("/api/notebooks/{notebook_id}/artifacts")
+def get_notebook_artifacts(notebook_id: str, hf_user_id: str = Depends(verify_hf_user), db: Session = Depends(get_db)):
+    """Fetch all generated artifacts for the notebook to hydrate UI tabs"""
+    notebook = db.query(Notebook).filter(Notebook.notebook_id == notebook_id, Notebook.hf_user_id == hf_user_id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+        
+    artifacts = db.query(Artifact).filter(Artifact.notebook_id == notebook_id).all()
+    # Return as a dictionary mapped by artifact_type for easy frontend lookup
+    return {a.artifact_type: a.content for a in artifacts}
+
 @app.post("/api/upload")
 async def upload_document(
     notebook_name: str = Form(...),
