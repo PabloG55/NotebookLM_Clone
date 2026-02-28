@@ -16,12 +16,20 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Install Hugging Face Hub
-        run: pip install huggingface_hub
-
       - name: Sync to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          python -m huggingface_hub.commands.user login --token $HF_TOKEN --add-to-git-credential
-          python -m huggingface_hub.hf_api upload_repo --token $HF_TOKEN --repo-id PabloG55/NotebookLM_Clone --repo-type space --path-in-repo . .
+          pip install huggingface_hub
+          python3 -c "
+          import os
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ['HF_TOKEN'])
+          api.upload_repo(
+              repo_id='PabloG55/NotebookLM_Clone',
+              repo_type='space',
+              folder_path='.',
+              path_in_repo='.',
+              delete_patterns=['*.pyc', 'venv/*', '.git/*']
+          )
+          "
