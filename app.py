@@ -428,11 +428,11 @@ def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
         info_md = f"📊 **{nb_name}** · {count} context chunks indexed."
 
         docs = db.query(Document).filter(Document.notebook_id == nb_id).all()
-        nb_dir = get_notebook_subdir(profile.username, nb_id)
+        raw_dir = get_notebook_subdir(profile.username, nb_id, "files_raw")
         files = []
         import os
         for d in docs:
-            fpath = os.path.join(nb_dir, "raw", d.filename)
+            fpath = os.path.join(raw_dir, d.filename)
             if os.path.exists(fpath):
                 files.append(fpath)
         if not files:
