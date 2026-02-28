@@ -13,7 +13,7 @@ load_dotenv()
 MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "gemma2-9b-it",
+    "llama3-8b-8192",
     "mixtral-8x7b-32768",
 ]
 
@@ -32,7 +32,7 @@ def _is_rate_limit_error(e) -> bool:
 
 def _is_not_found_error(e) -> bool:
     msg = str(e).lower()
-    return "404" in msg or "does not exist" in msg
+    return "404" in msg or "does not exist" in msg or "model_decommissioned" in msg
 
 
 def _extract_retry_time(e) -> str:
