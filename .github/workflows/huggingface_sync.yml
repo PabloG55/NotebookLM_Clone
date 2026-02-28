@@ -24,7 +24,15 @@ jobs:
           python3 -c "
           import os
           from huggingface_hub import HfApi
-          api = HfApi(token=os.environ['HF_TOKEN'])
+          token = os.environ.get('HF_TOKEN', '').strip()
+          if not token:
+              print('❌ ERROR: HF_TOKEN is empty or not found in environment variables.')
+              print('Please go to your GitHub Repo -> Settings -> Secrets and variables -> Actions')
+              print('And ensure you have a secret named HF_TOKEN with your Hugging Face Write token.')
+              exit(1)
+
+          api = HfApi(token=token)
+          print(f'🚀 Starting upload to PabloG55/NotebookLM_Clone...')
           api.upload_folder(
               repo_id='PabloG55/NotebookLM_Clone',
               repo_type='space',
@@ -32,4 +40,5 @@ jobs:
               path_in_repo='.',
               delete_patterns=['*.pyc', 'venv/*', '.git/*']
           )
+          print('✅ Sync completed!')
           "
