@@ -25,7 +25,7 @@ jobs:
           import os
           from huggingface_hub import HfApi
           api = HfApi(token=os.environ['HF_TOKEN'])
-          api.upload_repo(
+          api.upload_folder(
               repo_id='PabloG55/NotebookLM_Clone',
               repo_type='space',
               folder_path='.',
