@@ -629,6 +629,9 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
     def _do_append(nb, st, fi, url, profile: gr.OAuthProfile | None): return process_source(nb, st, fi, url, True, profile)
     def _do_add(nb, st, fi, url, profile: gr.OAuthProfile | None): return process_source(nb, st, fi, url, False, profile)
     
+    rename_btn.click(rename_notebook, [active_nb, rename_in], [active_nb, rename_in, nb_info_md])
+    delete_btn.click(delete_notebook, [active_nb], [active_nb, nb_info_md])
+    
     # Refresh notebook data logic
     active_nb.change(
         load_notebook_data, 
