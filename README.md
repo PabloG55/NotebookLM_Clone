@@ -1,6 +1,5 @@
 ---
-title: ThinkBook 🧠 (NotebookLM Clone)
-emoji: 🧠
+title: ThinkBook (NotebookLM Clone)
 colorFrom: indigo
 colorTo: blue
 sdk: gradio
@@ -18,7 +17,7 @@ Built with **FastAPI**, **Gradio**, **ChromaDB**, and powered by **Groq** for li
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 - **Document Ingestion:** Support for PDF, PPTX, TXT, and Web URLs.
 - **Vector Search:** RAG (Retrieval-Augmented Generation) powered by ChromaDB.
@@ -29,7 +28,7 @@ Built with **FastAPI**, **Gradio**, **ChromaDB**, and powered by **Groq** for li
 
 ---
 
-## 🛠️ Local Installation
+## Local Installation
 
 ### Prerequisites
 
@@ -68,6 +67,7 @@ Built with **FastAPI**, **Gradio**, **ChromaDB**, and powered by **Groq** for li
 
 5. **Start the Application:**
    Run the startup script which launches both the FastAPI backend and the Gradio frontend:
+
    ```bash
    chmod +x start.sh
    ./start.sh
@@ -94,6 +94,27 @@ Thinking of deploying to a Space? Follow these steps:
 
 ---
 
+## GitHub Setup & CI/CD
+
+To host this project on GitHub and automatically sync it to Hugging Face:
+
+1. **Create a GitHub Repository:** Go to [github.com/new](https://github.com/new) and create a repository named `NotebookLM_Clone`.
+2. **Push to GitHub:**
+   ```bash
+   git remote add github https://github.com/PabloG55/NotebookLM_Clone.git
+   git push github main
+   ```
+3. **Configure CI/CD Secrets:**
+   In your GitHub repository:
+   - Go to **Settings** > **Secrets and variables** > **Actions**.
+   - Add a **New repository secret**:
+     - **Name:** `HF_TOKEN`
+     - **Value:** (Your Hugging Face **Write** token).
+
+Every time you push to the `main` branch on GitHub, the GitHub Action will automatically update your Hugging Face Space.
+
+---
+
 ## 🏗️ Architecture
 
 - **`api.py`**: FastAPI backend handling database operations, file storage, and vector search.
@@ -103,6 +124,6 @@ Thinking of deploying to a Space? Follow these steps:
 
 ---
 
-## 📝 License
+## License
 
 MIT
