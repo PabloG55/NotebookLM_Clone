@@ -62,7 +62,7 @@ def fetch_notebooks(profile: gr.OAuthProfile | None):
     finally:
         db.close()
 
-def process_source(notebook_name, source_type, file_obj, url_text, profile: gr.OAuthProfile | None):
+def process_source(notebook_name, source_type, file_obj, url_text, is_append, profile: gr.OAuthProfile | None):
     if not profile:
         return "❌ Please log in with Hugging Face first.", gr.Dropdown()
     
@@ -74,14 +74,18 @@ def process_source(notebook_name, source_type, file_obj, url_text, profile: gr.O
     try:
         # Check if notebook exists
         notebook = db.query(Notebook).filter(Notebook.hf_user_id == profile.username, Notebook.title == name).first()
-        if notebook:
-            return f"❌ '{name}' already exists. Use a different name.", gr.Dropdown()
-        
-        # Create Notebook Record
-        nb_id = str(uuid.uuid4())
-        notebook = Notebook(notebook_id=nb_id, hf_user_id=profile.username, title=name)
-        db.add(notebook)
-        db.commit()
+        if is_append:
+            if not notebook:
+                return f"❌ '{name}' does not exist. Cannot append.", gr.Dropdown()
+            nb_id = notebook.notebook_id
+        else:
+            if notebook:
+                return f"❌ '{name}' already exists. Use a different name.", gr.Dropdown()
+            # Create Notebook Record
+            nb_id = str(uuid.uuid4())
+            notebook = Notebook(notebook_id=nb_id, hf_user_id=profile.username, title=name)
+            db.add(notebook)
+            db.commit()
 
         # Process Content
         all_text = []
@@ -120,8 +124,9 @@ def process_source(notebook_name, source_type, file_obj, url_text, profile: gr.O
 
         combined_text = "\n\n---\n\n".join(all_text)
         if not combined_text or len(combined_text.strip()) < 50:
-            db.delete(notebook)
-            db.commit()
+            if not is_append:
+                db.delete(notebook)
+                db.commit()
             return "❌ Could not extract enough text.", gr.Dropdown()
 
         # Vectorize
@@ -135,7 +140,8 @@ def process_source(notebook_name, source_type, file_obj, url_text, profile: gr.O
         # Refresh list
         notebooks = db.query(Notebook).filter(Notebook.hf_user_id == profile.username).order_by(Notebook.created_at.desc()).all()
         choices = [nb.title for nb in notebooks]
-        return f"✅ **{name}** added! {len(chunks)} chunks processed.", gr.Dropdown(choices=choices, value=name)
+        action = "appended to" if is_append else "added!"
+        return f"✅ **{name}** {action} {len(chunks)} chunks processed.", gr.Dropdown(choices=choices, value=name)
     except Exception as e:
         db.rollback()
         return f"❌ Error: {e}", gr.Dropdown()
@@ -173,7 +179,7 @@ def rename_notebook(old_name, new_name, profile: gr.OAuthProfile | None):
         
         notebooks = db.query(Notebook).filter(Notebook.hf_user_id == profile.username).order_by(Notebook.created_at.desc()).all()
         choices = [nb.title for nb in notebooks]
-        return gr.Dropdown(choices=choices, value=new_name.strip()), f"✅ Renamed to '{new_name}'."
+        return gr.Dropdown(choices=choices, value=new_name.strip()), gr.update(value=""), f"✅ Renamed to **{new_name.strip()}**"
     finally:
         db.close()
 
@@ -232,7 +238,7 @@ def chat_response(message, history, notebook_name, profile: gr.OAuthProfile | No
     finally:
         db.close()
 
-def generate_audio_ui(lines_state, notebook_name, profile: gr.OAuthProfile | None):
+async def generate_audio_ui(lines_state, notebook_name, profile: gr.OAuthProfile | None):
     if not lines_state or not profile or not notebook_name:
         return None, "❌ Generate the podcast script first."
     
@@ -245,7 +251,7 @@ def generate_audio_ui(lines_state, notebook_name, profile: gr.OAuthProfile | Non
         if existing:
             audio_bytes = base64.b64decode(existing.content)
         else:
-            audio_bytes = generate_podcast_audio(lines_state)
+            audio_bytes = await generate_podcast_audio(lines_state)
             base64_audio = base64.b64encode(audio_bytes).decode('utf-8')
             db.add(Artifact(artifact_id=str(uuid.uuid4()), notebook_id=notebook.notebook_id, 
                             artifact_type="podcast_audio", content=base64_audio))
@@ -399,36 +405,54 @@ footer { display: none !important; }
 """
 
 with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
-    gr.Markdown("# 🧠 ThinkBook\nMulti-user NotebookLM clone with full persistence.", elem_id="title")
+    with gr.Row():
+        gr.Markdown("# 🧠 ThinkBook\nMulti-user NotebookLM clone with full persistence.", elem_id="title", scale=4)
+        login_btn = gr.LoginButton()
     
     with gr.Row():
-        login_btn = gr.LoginButton()
-        active_nb = gr.Dropdown(choices=[], label="📚 My Notebooks", interactive=True, scale=4)
-        nb_info_md = gr.Markdown("_Login to start_")
+        active_nb = gr.Dropdown(choices=[], label="📚 Active Notebook", interactive=True, scale=4)
+        with gr.Column(scale=2):
+            nb_info_md = gr.Markdown("_Login to start_")
+            with gr.Row():
+                rename_in = gr.Textbox(placeholder="New name...", show_label=False, scale=3)
+                rename_btn = gr.Button("✏️ Rename", size="sm", scale=1)
+                delete_btn = gr.Button("🗑️ Delete", size="sm", scale=1, variant="stop")
 
     demo.load(fetch_notebooks, outputs=active_nb)
-    active_nb.change(get_notebook_info, inputs=active_nb, outputs=nb_info_md)
+
+    # Note: the main hydration call is at the end of the file
 
     with gr.Tabs():
         # Notebooks Tab
         with gr.TabItem("📁 Management"):
             with gr.Row():
-                with gr.Column():
-                    nb_name = gr.Textbox(label="New Notebook Name")
-                    src_type = gr.Radio(["Files (PDF / PPTX / TXT)", "URL"], label="Source Type", value="Files (PDF / PPTX / TXT)")
-                    file_in = gr.File(label="Upload Files", file_count="multiple")
-                    url_in = gr.Textbox(label="URL", visible=False)
-                    src_type.change(lambda t: (gr.update(visible=t=="Files (PDF / PPTX / TXT)"), gr.update(visible=t=="URL")), inputs=src_type, outputs=[file_in, url_in])
+                with gr.Column(variant="panel"):
+                    gr.Markdown("### ➕ Create New Notebook")
+                    nb_name = gr.Textbox(label="Notebook Name", placeholder="e.g. Biology Notes")
+                    src_type1 = gr.Radio(["Files (PDF / PPTX / TXT)", "URL"], label="Source Type", value="Files (PDF / PPTX / TXT)")
+                    file_in1 = gr.File(label="Upload Files", file_count="multiple")
+                    url_in1 = gr.Textbox(label="URL", visible=False)
+                    def toggle(t): return gr.update(visible=t=="Files (PDF / PPTX / TXT)", value=None), gr.update(visible=t=="URL", value="")
+                    src_type1.change(toggle, inputs=src_type1, outputs=[file_in1, url_in1])
                     add_btn = gr.Button("🚀 Create Notebook", variant="primary")
-                with gr.Column():
                     add_status = gr.Markdown("_Add a notebook to begin_")
-                    rename_in = gr.Textbox(label="New Name")
-                    rename_btn = gr.Button("✏️ Rename Selected")
-                    del_btn = gr.Button("🗑️ Delete Selected", variant="stop")
+                    
+                    def clear_file(): return None
+                    
+                with gr.Column(variant="panel"):
+                    gr.Markdown("### 📎 Append to Active Notebook")
+                    gr.Markdown("_Adds sources to the notebook currently selected in the top bar._")
+                    src_type2 = gr.Radio(["Files (PDF / PPTX / TXT)", "URL"], label="Source Type", value="Files (PDF / PPTX / TXT)")
+                    file_in2 = gr.File(label="Upload Files", file_count="multiple")
+                    url_in2 = gr.Textbox(label="URL", visible=False)
+                    src_type2.change(toggle, inputs=src_type2, outputs=[file_in2, url_in2])
 
-            add_btn.click(process_source, [nb_name, src_type, file_in, url_in], [add_status, active_nb])
-            rename_btn.click(rename_notebook, [active_nb, rename_in], [active_nb, add_status])
-            del_btn.click(delete_notebook, [active_nb], [active_nb, add_status])
+                    append_btn = gr.Button("📎 Process & Append", variant="primary")
+                    append_status = gr.Markdown()
+                    
+
+            with gr.Row():
+                nb_files_view = gr.File(label="Files Currently in Notebook (Read-Only)", interactive=False)
 
         # Chat Tab
         with gr.TabItem("💬 Chat"):
@@ -439,39 +463,71 @@ with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
             send_btn.click(chat_response, [chat_in, chatbot, active_nb], [chatbot, chat_in])
             chat_in.submit(chat_response, [chat_in, chatbot, active_nb], [chatbot, chat_in])
 
-        # Feature Tabs... (Summary, Podcast, Quiz, Study Guide)
+        # Feature Tabs... 
         with gr.TabItem("📝 Summary"):
             sum_mode = gr.Radio(["Brief", "Descriptive"], value="Brief", label="Style")
             sum_btn = gr.Button("✨ Generate")
             sum_out = gr.Markdown()
-            sum_btn.click(generate_summary_ui, [active_nb, sum_mode], sum_out)
+            def load_sum(): return "⏳ Generating Summary..."
+            sum_btn.click(load_sum, None, sum_out).then(generate_summary_ui, [active_nb, sum_mode], sum_out)
 
         with gr.TabItem("🎙️ Podcast"):
             exchanges_sl = gr.Slider(8, 20, value=12, step=1, label="Exchanges")
             pod_btn = gr.Button("🎙️ Generate Script")
             pod_script_out = gr.Markdown()
             pod_lines_state = gr.State()
+            def load_pod(): return "⏳ Generating Podcast Script...", None
+            pod_btn.click(load_pod, None, [pod_script_out, pod_lines_state]).then(generate_podcast_ui, [active_nb, exchanges_sl], [pod_script_out, pod_lines_state])
+            
             audio_btn = gr.Button("🔊 Generate Audio")
             audio_status = gr.Markdown()
             audio_out = gr.Audio(label="🎧 Listen")
-            pod_btn.click(generate_podcast_ui, [active_nb, exchanges_sl], [pod_script_out, pod_lines_state])
-            audio_btn.click(generate_audio_ui, [pod_lines_state, active_nb], [audio_out, audio_status])
+            def load_audio(): return None, "⏳ Generating Audio (may take a minute)..."
+            audio_btn.click(load_audio, None, [audio_out, audio_status]).then(generate_audio_ui, [pod_lines_state, active_nb], [audio_out, audio_status])
 
         with gr.TabItem("🧪 Quiz"):
             num_q_sl = gr.Slider(3, MAX_QUIZ_Q, value=5, step=1, label="Questions")
             quiz_gen_btn = gr.Button("🎲 Generate Quiz")
-            quiz_json_box = gr.Textbox(visible=False)
+            quiz_json_box = gr.Textbox(visible=False, value="{}")
+            quiz_status_md = gr.Markdown()
             quiz_display_md = gr.Markdown()
             ans_radios = [gr.Radio(choices=["A", "B", "C", "D"], label=f"Q{i+1}", visible=False) for i in range(MAX_QUIZ_Q)]
             submit_btn = gr.Button("✅ Submit Answers")
             quiz_res_md = gr.Markdown()
-            quiz_gen_btn.click(gen_quiz_ui, [active_nb, num_q_sl], [quiz_res_md, quiz_json_box, quiz_display_md] + ans_radios)
+            
+            def load_quiz(): return "⏳ Generating Quiz...", "{}", "", "", gr.update(visible=False)
+            quiz_gen_btn.click(
+                load_quiz, None, [quiz_status_md, quiz_json_box, quiz_display_md, quiz_res_md] + [ans_radios[0]]
+            ).then(
+                gen_quiz_ui, [active_nb, num_q_sl], [quiz_status_md, quiz_json_box, quiz_display_md, quiz_res_md] + ans_radios
+            )
             submit_btn.click(submit_quiz_ui, [quiz_json_box] + ans_radios, quiz_res_md)
 
         with gr.TabItem("📚 Study Guide"):
             study_btn = gr.Button("📚 Generate")
             study_out = gr.Markdown()
-            study_btn.click(get_study_guide_ui, [active_nb], study_out)
+            def load_study(): return "⏳ Generating Study Guide..."
+            study_btn.click(load_study, None, study_out).then(get_study_guide_ui, [active_nb], study_out)
+
+    
+    # === WIRING HOISTS ===
+    def _do_append(nb, st, fi, url, p): return process_source(nb, st, fi, url, True, p)
+    append_btn.click(_do_append, [active_nb, src_type2, file_in2, url_in2], [append_status, active_nb])
+
+    # Refresh notebook data logic
+    active_nb.change(
+        load_notebook_data, 
+        inputs=[active_nb], 
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_res_md] + ans_radios
+    )
+
+    # After add/append, clear inputs and reload notebook
+    add_btn.click(clear_file, None, file_in1).then(
+        load_notebook_data, inputs=[active_nb], outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_res_md] + ans_radios
+    )
+    append_btn.click(clear_file, None, file_in2).then(
+        load_notebook_data, inputs=[active_nb], outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out, audio_out, quiz_res_md] + ans_radios
+    )
 
 if __name__ == "__main__":
     demo.launch()
