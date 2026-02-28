@@ -406,7 +406,7 @@ footer { display: none !important; }
 
 with gr.Blocks(title="ThinkBook 🧠", css=css) as demo:
     with gr.Row():
-        gr.Markdown("# 🧠 ThinkBook\nMulti-user NotebookLM clone with full persistence.", elem_id="title", scale=4)
+        gr.Markdown("# 🧠 ThinkBook\nMulti-user NotebookLM clone with full persistence.", elem_id="title")
         login_btn = gr.LoginButton()
     
     with gr.Row():
