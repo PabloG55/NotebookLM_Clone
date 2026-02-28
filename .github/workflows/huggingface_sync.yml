@@ -32,9 +32,9 @@ jobs:
               exit(1)
 
           api = HfApi(token=token)
-          print(f'🚀 Starting upload to PabloG55/NotebookLM_Clone...')
+          print(f'🚀 Starting upload to pgarces/NotebookLM_Clone...')
           api.upload_folder(
-              repo_id='PabloG55/NotebookLM_Clone',
+              repo_id='pgarces/NotebookLM_Clone',
               repo_type='space',
               folder_path='.',
               path_in_repo='.',
