@@ -24,6 +24,7 @@ class Notebook(Base):
 
     documents = relationship("Document", back_populates="notebook", cascade="all, delete-orphan")
     messages = relationship("ChatMessage", back_populates="notebook", cascade="all, delete-orphan")
+    artifacts = relationship("Artifact", back_populates="notebook", cascade="all, delete-orphan")
 
 class Document(Base):
     __tablename__ = "documents"
@@ -47,6 +48,17 @@ class ChatMessage(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     notebook = relationship("Notebook", back_populates="messages")
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+
+    artifact_id = Column(String, primary_key=True, index=True)
+    notebook_id = Column(String, ForeignKey("notebooks.notebook_id"), nullable=False)
+    artifact_type = Column(String, nullable=False) # e.g., 'summary', 'quiz', 'study_guide', 'podcast_script'
+    content = Column(Text, nullable=False) # JSON or markdown string
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    notebook = relationship("Notebook", back_populates="artifacts")
 
 # Create all tables in the engine. This is equivalent to "Create Table"
 # statements in raw SQL.

@@ -2,9 +2,10 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Hea
 from sqlalchemy.orm import Session
 from typing import List
 import uuid
+import json
 
 # Models and DB
-from core.database import get_db, Notebook, Document, ChatMessage
+from core.database import get_db, Notebook, Document, ChatMessage, Artifact
 from core.storage_manager import save_raw_file, get_chroma_db_dir, delete_notebook_storage
 from core.vector_store import VectorStore
 # Specific feature logic
@@ -159,7 +160,24 @@ async def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(
     if not notebook:
         raise HTTPException(status_code=404, detail="Notebook not found or unauthorized")
         
-    # Reconstruct text by querying ChromaDB for all chunks
+    # Check if Artifact is already cached in database
+    # For parameterized types (like modes), we append the param to the artifact_type for caching uniqueness
+    cache_key = request.artifact_type
+    if request.artifact_type == "summary":
+        cache_key += f"_{request.params.get('mode', 'Brief').lower()}"
+    elif request.artifact_type == "podcast_script":
+        cache_key += f"_{request.params.get('num_exchanges', 12)}"
+    elif request.artifact_type == "quiz":
+        cache_key += f"_{request.params.get('num_questions', 5)}"
+        
+    existing_artifact = db.query(Artifact).filter(Artifact.notebook_id == request.notebook_id, Artifact.artifact_type == cache_key).first()
+    if existing_artifact:
+        # It's cached! Return it natively.
+        if request.artifact_type in ["podcast_script", "quiz"]:
+            return json.loads(existing_artifact.content)
+        return {"result": existing_artifact.content}
+
+    # Not cached. Reconstruct text by querying ChromaDB for all chunks
     chroma_dir = get_chroma_db_dir(hf_user_id, request.notebook_id)
     vstore = VectorStore(chroma_dir)
     chunks = vstore.collection.get()["documents"]
@@ -173,6 +191,8 @@ async def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(
         from features.summarizer import summarize
         mode = request.params.get("mode", "Brief").lower()
         res = summarize(full_text, mode=mode)
+        db.add(Artifact(artifact_id=str(uuid.uuid4()), notebook_id=request.notebook_id, artifact_type=cache_key, content=res))
+        db.commit()
         return {"result": res}
         
     elif request.artifact_type == "podcast_script":
@@ -180,27 +200,25 @@ async def generate_artifact(request: GenerateRequest, hf_user_id: str = Depends(
         num_exchanges = int(request.params.get("num_exchanges", 12))
         script_md = generate_podcast_script(full_text, num_exchanges)
         parsed_lines = parse_podcast_script(script_md)
-        return {"script": script_md, "parsed_lines": parsed_lines}
-        
-    elif request.artifact_type == "podcast_audio":
-        from features.podcast import generate_podcast_audio
-        from fastapi.responses import Response
-        # Audio generation just takes the parsed lines directly, it doesn't need to read the notebook from DB
-        parsed_lines = request.params.get("parsed_lines")
-        if not parsed_lines:
-            raise HTTPException(status_code=400, detail="parsed_lines required for audio generation")
-        audio_bytes = generate_podcast_audio(parsed_lines)
-        return Response(content=audio_bytes, media_type="audio/mpeg")
+        out_dict = {"script": script_md, "parsed_lines": parsed_lines}
+        db.add(Artifact(artifact_id=str(uuid.uuid4()), notebook_id=request.notebook_id, artifact_type=cache_key, content=json.dumps(out_dict)))
+        db.commit()
+        return out_dict
         
     elif request.artifact_type == "quiz":
         from features.quiz import generate_quiz
         num_questions = int(request.params.get("num_questions", 5))
         quiz_data = generate_quiz(full_text, num_questions)
-        return {"quiz": quiz_data}
+        out_dict = {"quiz": quiz_data}
+        db.add(Artifact(artifact_id=str(uuid.uuid4()), notebook_id=request.notebook_id, artifact_type=cache_key, content=json.dumps(out_dict)))
+        db.commit()
+        return out_dict
         
     elif request.artifact_type == "study_guide":
         from features.study_guide import generate_study_guide
         study_guide = generate_study_guide(full_text)
+        db.add(Artifact(artifact_id=str(uuid.uuid4()), notebook_id=request.notebook_id, artifact_type=cache_key, content=study_guide))
+        db.commit()
         return {"result": study_guide}
         
     raise HTTPException(status_code=400, detail="Unknown artifact type")
