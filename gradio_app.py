@@ -219,6 +219,47 @@ def generate_study_guide(notebook_name, profile: gr.OAuthProfile | None):
     res = requests.post(f"{API_BASE_URL}/api/generate", headers=get_headers(profile), json={"notebook_id": nb_id, "artifact_type": "study_guide"})
     return res.json().get("result", f"❌ Error: {res.text}")
 
+def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
+    # Default empties for 9 UI components
+    if not nb_name or not profile:
+        return "No notebook selected.", None, [], "", "", None, "", "{}", ""
+        
+    res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
+    nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == nb_name), None)
+    
+    if not nb_id:
+        return "❌ Notebook not found.", None, [], "", "", None, "", "{}", ""
+        
+    # Fetch uploaded files
+    res_files = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/files", headers=get_headers(profile))
+    files = res_files.json() if res_files.status_code == 200 else None
+    
+    # Fetch chat history
+    res_chats = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/chats", headers=get_headers(profile))
+    chats = res_chats.json() if res_chats.status_code == 200 else []
+    
+    # Fetch generated artifacts
+    res_artifacts = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/artifacts", headers=get_headers(profile))
+    artifacts = res_artifacts.json() if res_artifacts.status_code == 200 else {}
+    
+    sum_val = next((v for k, v in artifacts.items() if k.startswith("summary")), "")
+    pod_script_val = next((json.loads(v).get("script", "") for k, v in artifacts.items() if k.startswith("podcast_script")), "")
+    pod_lines_val = next((json.loads(v).get("parsed_lines", []) for k, v in artifacts.items() if k.startswith("podcast_script")), None)
+    quiz_val = next((json.loads(v).get("quiz", []) for k, v in artifacts.items() if k.startswith("quiz")), [])
+    
+    quiz_json_val = json.dumps(quiz_val) if quiz_val else "{}"
+    quiz_display = ""
+    if quiz_val:
+        for i, q in enumerate(quiz_val):
+            quiz_display += f"**Q{i+1}: {q.get('question', '')}**\n"
+            for j, opt in enumerate(q.get('options', [])):
+                 quiz_display += f"- {chr(65+j)}: {opt}\n"
+            quiz_display += "\n"
+            
+    study_val = next((v for k, v in artifacts.items() if k.startswith("study_guide")), "")
+    
+    return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val
+
 # ==========================================
 # UI Build
 # ==========================================
@@ -410,46 +451,7 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
             def load_study(): return "⏳ Generating Study Guide..."
             study_btn.click(load_study, None, study_out).then(generate_study_guide, inputs=[active_nb], outputs=study_out)
 
-    def load_notebook_data(nb_name, profile: gr.OAuthProfile | None):
-        # Default empties for 9 UI components
-        if not nb_name or not profile:
-            return "No notebook selected.", None, [], "", "", None, "", "{}", ""
-            
-        res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile)).json()
-        nb_id = next((nb["id"] for nb in res_nbs if nb["title"] == nb_name), None)
-        
-        if not nb_id:
-            return "❌ Notebook not found.", None, [], "", "", None, "", "{}", ""
-            
-        # Fetch uploaded files
-        res_files = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/files", headers=get_headers(profile))
-        files = res_files.json() if res_files.status_code == 200 else None
-        
-        # Fetch chat history
-        res_chats = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/chats", headers=get_headers(profile))
-        chats = res_chats.json() if res_chats.status_code == 200 else []
-        
-        # Fetch generated artifacts
-        res_artifacts = requests.get(f"{API_BASE_URL}/api/notebooks/{nb_id}/artifacts", headers=get_headers(profile))
-        artifacts = res_artifacts.json() if res_artifacts.status_code == 200 else {}
-        
-        sum_val = next((v for k, v in artifacts.items() if k.startswith("summary")), "")
-        pod_script_val = next((json.loads(v).get("script", "") for k, v in artifacts.items() if k.startswith("podcast_script")), "")
-        pod_lines_val = next((json.loads(v).get("parsed_lines", []) for k, v in artifacts.items() if k.startswith("podcast_script")), None)
-        quiz_val = next((json.loads(v).get("quiz", []) for k, v in artifacts.items() if k.startswith("quiz")), [])
-        
-        quiz_json_val = json.dumps(quiz_val) if quiz_val else "{}"
-        quiz_display = ""
-        if quiz_val:
-            for i, q in enumerate(quiz_val):
-                quiz_display += f"**Q{i+1}: {q.get('question', '')}**\n"
-                for j, opt in enumerate(q.get('options', [])):
-                     quiz_display += f"- {chr(65+j)}: {opt}\n"
-                quiz_display += "\n"
-                
-        study_val = next((v for k, v in artifacts.items() if k.startswith("study_guide")), "")
-        
-        return f"Selected: **{nb_name}**", files, chats, sum_val, pod_script_val, pod_lines_val, quiz_display, quiz_json_val, study_val
+
 
     active_nb.change(
         load_notebook_data, 
