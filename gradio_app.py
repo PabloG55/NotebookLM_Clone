@@ -321,18 +321,6 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
                     add_status = gr.Markdown("_Upload a source to begin._")
                     
                     def clear_file(): return None
-                    
-                    add_btn.click(
-                        process_source, 
-                        inputs=[nb_name, src_type1, file_in1, url_in1], 
-                        outputs=[add_status, active_nb]
-                    ).then(
-                        clear_file, None, file_in1
-                    ).then(
-                        load_notebook_data, 
-                        inputs=[active_nb], 
-                        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
-                    )
 
                 with gr.Column(variant="panel"):
                     gr.Markdown("### 📎 Append to Active Notebook")
@@ -345,17 +333,6 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
 
                     append_btn = gr.Button("📎 Process & Append", variant="primary")
                     append_status = gr.Markdown()
-                    append_btn.click(
-                        process_source, 
-                        inputs=[active_nb, src_type2, file_in2, url_in2], 
-                        outputs=[append_status, active_nb]
-                    ).then(
-                        clear_file, None, file_in2
-                    ).then(
-                        load_notebook_data, 
-                        inputs=[active_nb], 
-                        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
-                    )
             
             with gr.Row():
                 nb_files_view = gr.File(label="Files Currently in Notebook (Read-Only)", interactive=False)
@@ -454,6 +431,30 @@ with gr.Blocks(title="ThinkBook 🧠") as demo:
 
 
     active_nb.change(
+        load_notebook_data, 
+        inputs=[active_nb], 
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
+    )
+
+    add_btn.click(
+        process_source, 
+        inputs=[nb_name, src_type1, file_in1, url_in1], 
+        outputs=[add_status, active_nb]
+    ).then(
+        clear_file, None, file_in1
+    ).then(
+        load_notebook_data, 
+        inputs=[active_nb], 
+        outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
+    )
+
+    append_btn.click(
+        process_source, 
+        inputs=[active_nb, src_type2, file_in2, url_in2], 
+        outputs=[append_status, active_nb]
+    ).then(
+        clear_file, None, file_in2
+    ).then(
         load_notebook_data, 
         inputs=[active_nb], 
         outputs=[nb_info_md, nb_files_view, chatbot, sum_out, pod_script_out, pod_lines_state, quiz_display_md, quiz_json_box, study_out]
