@@ -54,6 +54,13 @@ def process_source(notebook_name, source_type, file_objs, url_text, profile: gr.
                 files = {"file": (os.path.basename(file_obj.name), f, "application/octet-stream")}
                 data = {"notebook_name": name}
                 
+                # Resolve ID if this notebook exists (needed for Append flow)
+                res_nbs = requests.get(f"{API_BASE_URL}/api/notebooks", headers=get_headers(profile))
+                if res_nbs.status_code == 200:
+                    notebook_id = next((nb["id"] for nb in res_nbs.json() if nb["title"] == name), None)
+                    if notebook_id:
+                        data["notebook_id"] = notebook_id
+                
                 res = requests.post(
                     f"{API_BASE_URL}/api/upload",
                     headers=get_headers(profile),

@@ -65,7 +65,8 @@ def get_notebook_artifacts(notebook_id: str, hf_user_id: str = Depends(verify_hf
 
 @app.post("/api/upload")
 async def upload_document(
-    notebook_name: str = Form(...),
+    notebook_name: str = Form(None),
+    notebook_id: str = Form(None),
     file: UploadFile = File(...),
     hf_user_id: str = Depends(verify_hf_user),
     db: Session = Depends(get_db)
@@ -82,11 +83,19 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Unsupported file format.")
 
     # 1. Find or create notebook
-    notebook = db.query(Notebook).filter(Notebook.hf_user_id == hf_user_id, Notebook.title == notebook_name).first()
-    if not notebook:
-        notebook = Notebook(notebook_id=str(uuid.uuid4()), hf_user_id=hf_user_id, title=notebook_name)
-        db.add(notebook)
-        db.commit()
+    notebook = None
+    if notebook_id:
+        notebook = db.query(Notebook).filter(Notebook.notebook_id == notebook_id, Notebook.hf_user_id == hf_user_id).first()
+        if not notebook:
+            raise HTTPException(status_code=404, detail="Notebook ID provided but not found.")
+    elif notebook_name:
+        notebook = db.query(Notebook).filter(Notebook.hf_user_id == hf_user_id, Notebook.title == notebook_name).first()
+        if not notebook:
+            notebook = Notebook(notebook_id=str(uuid.uuid4()), hf_user_id=hf_user_id, title=notebook_name)
+            db.add(notebook)
+            db.commit()
+    else:
+        raise HTTPException(status_code=400, detail="Must provide either notebook_name or notebook_id")
 
     # 2. Extract Raw Bytes & Vectorize
     raw_bytes = await file.read()
