@@ -123,7 +123,12 @@ Every time you push to the `main` branch on GitHub, the GitHub Action will autom
 - **`features/`**: High-level modules for summarization, podcasts, and quizzes.
 
 ---
-
+## Collaborators
+1. Aashlesha Rajput
+2. David Caballero
+3. Purva Jagtap
+4. Rachietaa Rao 
+---
 ## License
 
 MIT
